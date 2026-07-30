@@ -1,0 +1,10 @@
+sequence_length: 512
+stride: 1
+prediction_horizon: 0
+
+padding:
+  enabled: false
+
+sampling: contiguous
+
+drop_incomplete_windows: true

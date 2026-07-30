@@ -1,0 +1,21 @@
+{
+  "feature_builder_version": "v1",
+  "feature_order": [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "funding_rate",
+    "open_interest",
+    "minute_of_day",
+    "hour",
+    "day_of_week",
+    "day_of_month",
+    "month",
+    "quarter",
+    "year",
+    "is_weekend"
+  ],
+  "feature_dimension": 15
+}

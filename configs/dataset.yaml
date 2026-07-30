@@ -1,0 +1,9 @@
+dataset:
+  name: "PureMarketFoundationModelDataset"
+  version: "1.0.0"
+  schema_version: "v1"
+  default_symbols:
+    - BTCUSDT
+    - ETHUSDT
+    - SOLUSDT
+  default_market: "futures"

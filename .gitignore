@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.benchmarks/
+logs/
+test_download.zip
+storage/

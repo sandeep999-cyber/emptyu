@@ -1,0 +1,11 @@
+storage:
+  base_dir: "storage"
+  raw_dir: "storage/raw"
+  canonical_dir: "storage/canonical"
+  lake_dir: "storage/lake"
+  training_dir: "storage/training"
+  models_dir: "models"
+  logs_dir: "logs"
+  parquet_compression: "snappy"
+  db_path: "storage/training/index.duckdb"
+  experiment_db_path: "storage/training/experiment_registry.duckdb"

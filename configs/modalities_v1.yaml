@@ -1,0 +1,14 @@
+klines:
+  enabled: true
+funding:
+  enabled: true
+open_interest:
+  enabled: true
+calendar:
+  enabled: true
+agg_trades:
+  enabled: false
+depth:
+  enabled: false
+liquidations:
+  enabled: false

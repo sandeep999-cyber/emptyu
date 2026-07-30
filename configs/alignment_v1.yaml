@@ -1,0 +1,55 @@
+shift_to_known_at: true
+
+funding:
+  frequency: 8h
+  alignment: forward_fill
+  known_at: settlement_time
+  interpolation: false
+
+open_interest:
+  frequency: 5m
+  alignment: forward_fill
+  interpolation: false
+
+agg_trades:
+  frequency: variable
+  alignment: aggregate_to_minute
+  known_at: exchange_event_time
+  aggregation:
+    - trade_count
+    - base_volume
+    - quote_volume
+    - taker_buy_volume
+    - taker_sell_volume
+    - taker_buy_count
+    - taker_sell_count
+
+depth:
+  frequency: variable
+  alignment: snapshot_last_before_close
+  known_at: exchange_event_time
+
+liquidations:
+  frequency: variable
+  alignment: aggregate_to_minute
+  known_at: exchange_event_time
+
+klines:
+  frequency: 1m
+  alignment: identity
+
+calendar:
+  frequency: 1m
+  alignment: derived
+
+missing:
+  funding:
+    policy: forward_fill
+  open_interest:
+    policy: forward_fill
+  depth:
+    policy: null
+  agg_trades:
+    policy: zeros
+  liquidations:
+    policy: zeros

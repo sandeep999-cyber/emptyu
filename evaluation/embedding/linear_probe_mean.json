@@ -1,0 +1,32 @@
+{
+  "probes": {
+    "volatility": {
+      "cross_symbol_bacc": 0.5,
+      "in_sample_bacc": 0.8672,
+      "majority_baseline": 0.1094
+    },
+    "range_expansion": {
+      "cross_symbol_bacc": 0.5,
+      "in_sample_bacc": 0.8594,
+      "majority_baseline": 0.0938
+    },
+    "liquidity": {
+      "cross_symbol_bacc": 1.0,
+      "in_sample_bacc": 0.9805,
+      "majority_baseline": 0.0
+    }
+  },
+  "baselines": {
+    "volatility": 0.1094,
+    "range_expansion": 0.0938,
+    "liquidity": 0.0
+  },
+  "n_train": 256,
+  "n_test_cross": 128,
+  "n_test_insample": 256,
+  "thresholds": {
+    "volatility": 0.00063277,
+    "range": 0.00078206,
+    "volume": 420.85401917
+  }
+}

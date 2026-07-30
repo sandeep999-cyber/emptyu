@@ -1,0 +1,135 @@
+{
+  "run_id": "20260730_203921_smoke",
+  "configs": {
+    "model_config": {
+      "model": {
+        "name": "teacher_transformer_v1",
+        "feature_dim": 15,
+        "context_length": 512,
+        "cls_token": true,
+        "d_model": 128,
+        "n_layers": 2,
+        "n_heads": 4,
+        "d_ff": 512,
+        "dropout": 0.1,
+        "rope_theta": 10000.0,
+        "pooling": [
+          "cls",
+          "mean",
+          "attention"
+        ]
+      },
+      "loss": {
+        "masked_modeling": {
+          "mask_ratio": 0.15,
+          "price_indices": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "funding_oi_indices": [
+            5,
+            6
+          ],
+          "calendar": {
+            "minute_of_day": {
+              "index": 7,
+              "classes": 1440,
+              "offset": 0
+            },
+            "hour": {
+              "index": 8,
+              "classes": 24,
+              "offset": 0
+            },
+            "day_of_week": {
+              "index": 9,
+              "classes": 7,
+              "offset": 0
+            },
+            "day_of_month": {
+              "index": 10,
+              "classes": 31,
+              "offset": 1
+            },
+            "month": {
+              "index": 11,
+              "classes": 12,
+              "offset": 1
+            },
+            "quarter": {
+              "index": 12,
+              "classes": 4,
+              "offset": 1
+            },
+            "year": {
+              "index": 13,
+              "classes": 16,
+              "offset": 2020
+            },
+            "is_weekend": {
+              "index": 14,
+              "classes": 2,
+              "offset": 0
+            }
+          },
+          "group_weights": {
+            "price": 1.0,
+            "funding_oi": 1.0,
+            "calendar": 1.0
+          }
+        }
+      }
+    },
+    "optimizer_config": {
+      "optimizer": {
+        "adamw": {
+          "lr": 0.0003,
+          "weight_decay": 0.01,
+          "betas": [
+            0.9,
+            0.999
+          ],
+          "eps": 1e-08
+        },
+        "grad_clip": 1.0
+      },
+      "scheduler": {
+        "warmup_frac": 0.05,
+        "decay": "cosine",
+        "lr_floor": 1e-06
+      }
+    },
+    "trainer_config": {
+      "batch_size": 8,
+      "epochs": 1,
+      "num_workers": 4,
+      "device": "cpu",
+      "seed": 42,
+      "market": "futures",
+      "train_window_stride": 16,
+      "val_window_stride": 16,
+      "max_train_windows": 256,
+      "max_val_windows": 64,
+      "log_every": 10,
+      "val_every": 1,
+      "checkpoint_every": 1,
+      "normalizer": {
+        "mode": "zscore"
+      }
+    }
+  },
+  "git_commit": "unknown",
+  "checkpoints": [
+    {
+      "epoch": 1,
+      "step": 64,
+      "path": "checkpoint_epoch1.pt",
+      "sha256": "6f4a1bf544a728a3",
+      "train_loss": 3.3880074322223663,
+      "val_loss": 74.4183702468872
+    }
+  ]
+}

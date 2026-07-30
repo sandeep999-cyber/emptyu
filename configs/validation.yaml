@@ -1,0 +1,21 @@
+validation:
+  strict_chronological: true
+  allow_duplicate_timestamps: false
+  max_timestamp_gap_seconds: 300
+  verify_sha256: true
+  modalities:
+    funding:
+      monotonic_timestamp: true
+      allow_missing: false
+    klines:
+      high_gte_low: true
+      close_positive: true
+    aggTrades:
+      trade_count_gte_zero: true
+      volume_gte_zero: true
+    depth:
+      bid_lte_ask: true
+      snapshot_complete: true
+    liquidations:
+      valid_side: true
+      quantity_gt_zero: true

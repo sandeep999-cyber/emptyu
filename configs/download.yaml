@@ -1,0 +1,21 @@
+download:
+  base_url: "https://data.binance.vision/data"
+  rest_url_futures: "https://fapi.binance.com"
+  rest_url_spot: "https://api.binance.com"
+  concurrency_limit: 8
+  timeout_seconds: 30
+  retry_attempts: 5
+  retry_backoff_factor: 1.5
+  verify_checksum: true
+  markets:
+    - futures
+    - spot
+  datasets:
+    - klines
+    - aggTrades
+    - trades
+    - funding
+    - open_interest
+    - depth
+    - liquidations
+  klines_interval: "1m"

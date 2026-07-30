@@ -1,0 +1,55 @@
+model:
+  name: teacher_transformer_v1
+  feature_dim: 15
+  context_length: 512
+  cls_token: true
+  d_model: 512
+  n_layers: 8
+  n_heads: 8
+  d_ff: 2048
+  dropout: 0.1
+  rope_theta: 10000.0
+  pooling: [cls, mean, attention]
+
+loss:
+  masked_modeling:
+    mask_ratio: 0.15
+    price_indices: [0, 1, 2, 3, 4]
+    funding_oi_indices: [5, 6]
+    calendar:
+      minute_of_day:
+        index: 7
+        classes: 1440
+        offset: 0
+      hour:
+        index: 8
+        classes: 24
+        offset: 0
+      day_of_week:
+        index: 9
+        classes: 7
+        offset: 0
+      day_of_month:
+        index: 10
+        classes: 31
+        offset: 1
+      month:
+        index: 11
+        classes: 12
+        offset: 1
+      quarter:
+        index: 12
+        classes: 4
+        offset: 1
+      year:
+        index: 13
+        classes: 16
+        offset: 2020
+      is_weekend:
+        index: 14
+        classes: 2
+        offset: 0
+    group_weights:
+      price: 1.0
+      funding_oi: 1.0
+      calendar: 1.0
