@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 import yaml
 import torch
@@ -43,8 +44,8 @@ def main():
         trainer_cfg["trainer"]["train_window_stride"] = 16
         trainer_cfg["trainer"]["val_window_stride"] = 16
         trainer_cfg["trainer"]["log_every"] = 10
-        trainer_cfg["trainer"]["num_workers"] = 4
-        print("[Smoke] Overriding config for smoke test (2L/128d, 256 windows, 1 epoch, CPU, 4 workers)")
+        trainer_cfg["trainer"]["num_workers"] = max(1, (os.cpu_count() or 1) // 2)
+        print(f"[Smoke] Overriding config for smoke test (2L/128d, 256 windows, 1 epoch, CPU, {trainer_cfg['trainer']['num_workers']} workers)")
 
     run_id = f"{time.strftime('%Y%m%d_%H%M%S')}_{'smoke' if args.smoke else 'full'}"
     run_dir = Path("models/foundation/teacher_v1") / run_id
