@@ -1,5 +1,8 @@
 trainer:
   batch_size: 64
+  # Per-step batch fed to the model; grads accumulate over batch_size/micro_batch_size
+  # steps so the effective batch (and LR schedule) stays 64. Lower to fit small GPUs.
+  micro_batch_size: 16
   epochs: 10
   num_workers: 2
   device: auto

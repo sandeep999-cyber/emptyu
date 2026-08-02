@@ -188,7 +188,8 @@ Calendar CE spec mirrors `model_v1.yaml` (still needed by the head even when
 
 | Key | Meaning | Default | Allowed values | Effect |
 |---|---|---|---|---|
-| `trainer.batch_size` | batch size | `64` | int ≥ 1 | memory + steps/epoch |
+| `trainer.batch_size` | effective batch (per optimizer step) | `64` | int ≥ 1 | memory + steps/epoch; must be divisible by `micro_batch_size` for exact effective-batch semantics |
+| `trainer.micro_batch_size` | per-step batch fed to the model; grads accumulate over `batch_size // micro_batch_size` steps | `batch_size` (no accumulation) | int in `[1, batch_size]` | **per-step VRAM**; effective batch + LR schedule unchanged, so results match a large batch on a small GPU |
 | `trainer.epochs` | number of epochs | `10` | int ≥ 1 | total training |
 | `trainer.num_workers` | DataLoader workers | `2` | int ≥ 0 | data pipeline parallelism (`persistent_workers` when > 0) |
 | `trainer.device` | device | `auto` | `auto`, `cuda`, `cpu` | `auto` → cuda if available else cpu |

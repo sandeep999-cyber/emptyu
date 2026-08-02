@@ -177,7 +177,7 @@ saves append rather than overwrite.
 | `No validation windows available` | SOL data absent | rebuild/download SOL |
 | val loss far above train loss | normalizer/distributional shift or tiny data | expected on held-out SOL at pilot scale; see `MODEL_CARD.md` |
 | `Failed to load resume checkpoint` warning | corrupted `.pt` | use a different checkpoint or restart |
-| CUDA OOM | batch 64 × 513×512 too large for VRAM | reduce `batch_size` (config), or smoke config |
+| CUDA OOM | batch 64 × 513×512 too large for VRAM | lower `micro_batch_size` (grad accumulation preserves effective batch + LR schedule), or smoke config |
 | Results not reproducible | non-deterministic op / changed data | verify fingerprint + git commit, reseed 42 |
 
 See `TROUBLESHOOTING.md` for the full catalog.

@@ -64,13 +64,17 @@ Defaults in `configs/trainer_v1.yaml` already target GPU:
 - `num_workers` → set to a sensible value for your machine (common choice:
   CPU core count); `pin_memory` and `persistent_workers` are enabled
   automatically on CUDA.
-- `batch_size: 64` fits a ~16-24 GB modern GPU at `context_length 512` /
-  `d_model 512`. On a smaller GPU, lower `batch_size` (the pipeline is not
-  batch-sensitive for correctness).
+- **Micro-batching:** `batch_size: 64` is the *effective* batch; the model is
+  fed `micro_batch_size: 16` per step and grads accumulate 4×, so the LR
+  schedule and optimizer semantics match a true batch-64 run while VRAM usage
+  drops ~4×. This fits a ~14.5 GiB GPU (e.g. Colab T4) at `context_length 512`
+  / `d_model 512`. On a smaller GPU, lower `micro_batch_size` further; on a
+  large GPU you can raise it or set it equal to `batch_size` (no accumulation).
 
 Expectations (full model, stride 16): ~65 K windows/epoch ≈ 33 M tokens,
-~1,030 steps/epoch at batch 64; order of minutes per epoch on a modern GPU;
-10 epochs well under a few hours. CPU full training is not recommended.
+~1,030 optimizer steps/epoch at effective batch 64; order of minutes per epoch
+on a modern GPU; 10 epochs well under a few hours. CPU full training is not
+recommended.
 
 ## 4. Running
 
@@ -116,7 +120,7 @@ python -m src.training.train_teacher --resume models/foundation/teacher_v1/<run_
 | Failure | Detection | Recovery |
 |---|---|---|
 | Interrupt / power loss | no `val loss` lines recently | `--resume` same run dir |
-| CUDA OOM | `torch.cuda.OutOfMemoryError` | lower `batch_size` (trainer config), or `max_train_windows`; rerun from last checkpoint |
+| CUDA OOM | `torch.cuda.OutOfMemoryError` | lower `micro_batch_size` (keeps effective batch + LR schedule) or `max_train_windows`; resume from last checkpoint |
 | CUDA driver/version mismatch | `torch.cuda.is_available() == False` | reinstall matching CUDA wheel |
 | Corrupt checkpoint | `Failed to load resume checkpoint` warning | delete/rename the corrupt `.pt`, update `latest.json` to a good one, resume |
 | Fingerprint mismatch | `validate` fails assertion | reconcile data (restore snapshot) — do NOT silently train on different data |

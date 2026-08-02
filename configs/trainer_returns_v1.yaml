@@ -1,5 +1,7 @@
 trainer:
   batch_size: 64
+  # Per-step batch; grads accumulate to effective batch 64 (see trainer_v1.yaml).
+  micro_batch_size: 16
   epochs: 10
   num_workers: 2
   device: auto

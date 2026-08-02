@@ -154,6 +154,16 @@ class TeacherTrainer:
         self.persistent_workers = self.num_workers > 0
         self.use_amp = bool(self.trainer_cfg.get("mixed_precision", False)) and self.device.type == "cuda"
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
+        # Micro-batching with gradient accumulation: `batch_size` stays the
+        # effective batch (optimizer step + scheduler step + LR curve), while
+        # `micro_batch_size` bounds per-step VRAM. Default = no accumulation.
+        eff_batch = int(trainer_cfg["batch_size"])
+        self.micro_batch_size = min(eff_batch, int(trainer_cfg.get("micro_batch_size", eff_batch)))
+        self.grad_accum = max(1, eff_batch // max(1, self.micro_batch_size))
+        self.log.info(
+            f"Micro-batch={self.micro_batch_size} grad_accum={self.grad_accum} "
+            f"(effective batch={self.micro_batch_size * self.grad_accum})"
+        )
         self.checkpoint_mgr = CheckpointManager(run_dir, {
             "model_config": model_cfg,
             "optimizer_config": opt_cfg,
@@ -262,7 +272,7 @@ class TeacherTrainer:
     def train(self):
         self.log.info("Starting training.")
         self.model.train()
-        batch_size = self.trainer_cfg["batch_size"]
+        batch_size = self.micro_batch_size
         sampler = EpochMarketSampler(
             len(self.train_dataset), shuffle=True, seed=self.trainer_cfg.get("seed", 42)
         )
@@ -292,8 +302,11 @@ class TeacherTrainer:
             self.model.train()
             epoch_losses = []
             epoch_group_sums: Dict[str, float] = {}
+            self.optimizer.zero_grad(set_to_none=True)
+            accum_loss = 0.0
+            accum_n = 0
 
-            for batch in dataloader:
+            for i, batch in enumerate(dataloader):
                 features = batch["features"]
                 feature_mask = batch["feature_mask"]
                 timestamps = batch["timestamps"]
@@ -328,26 +341,39 @@ class TeacherTrainer:
                 )
                 loss = losses["total"]
 
-                self.optimizer.zero_grad()
                 self.scaler.scale(loss).backward()
+                accum_loss += float(loss.item())
+                accum_n += 1
+                for k, v in losses.items():
+                    if k == "total":
+                        continue
+                    epoch_group_sums[k] = epoch_group_sums.get(k, 0.0) + v.item() * features.shape[0]
+
+                # Optimizer step at each accumulation boundary (and at epoch end
+                # for partial windows). Scheduler steps once per optimizer step,
+                # so the effective batch and LR curve match `batch_size`.
+                is_accum_last = (i + 1) % self.grad_accum == 0 or (i + 1) == len(dataloader)
+                if not is_accum_last:
+                    continue
+
                 self.scaler.unscale_(self.optimizer)
                 grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
                 self.scheduler.step()
+                step_loss = accum_loss / max(1, accum_n)
+                accum_loss = 0.0
+                accum_n = 0
+                self.optimizer.zero_grad(set_to_none=True)
 
-                epoch_losses.append(loss.item())
-                for k, v in losses.items():
-                    if k == "total":
-                        continue
-                    epoch_group_sums[k] = epoch_group_sums.get(k, 0.0) + v.item() * features.shape[0]
+                epoch_losses.append(step_loss)
                 global_step += 1
 
                 if global_step % self.trainer_cfg.get("log_every", 50) == 0:
                     lr = self.optimizer.param_groups[0]["lr"]
                     rss_mb = psutil.Process().memory_info().rss / 1e6
                     self.log.info(
-                        f"E{epoch} S{global_step} loss={loss.item():.4f} lr={lr:.2e} "
+                        f"E{epoch} S{global_step} loss={step_loss:.4f} lr={lr:.2e} "
                         f"gn={grad_norm:.2f} rss={rss_mb:.0f}MB"
                     )
 

@@ -155,8 +155,8 @@ implementation bug, not a signal** until investigated.
 ## 9. Success criteria — first GPU experiment
 
 The first full-scale GPU run (full `d_model 512`, 10 epochs, `model_v1.yaml`,
-seed 42, `batch_size 64`, CUDA) passes when **all** of the following hold.
-Each is compared against §8.
+seed 42, **effective** `batch_size 64` via `micro_batch_size 16` × grad-accum 4,
+CUDA) passes when **all** of the following hold. Each is compared against §8.
 
 | # | Criterion | Measure | Pass threshold |
 |---|---|---|---|
