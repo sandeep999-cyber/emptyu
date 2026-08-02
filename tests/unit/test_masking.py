@@ -4,6 +4,29 @@ import torch
 from src.training.losses.masked_modeling import MaskGenerator
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_generator_device_matches_mask():
+    """Regression: a CPU generator must not be used with CUDA masks."""
+    gen = MaskGenerator(mask_ratio=0.15, device=torch.device("cuda"))
+    mask = torch.ones(8, 512, dtype=torch.bool, device="cuda")
+    out = gen(mask)
+    assert out.device.type == "cuda"
+
+    gen_span = MaskGenerator(
+        mask_ratio=0.15, mask_mode="span", span_len=16, device=torch.device("cuda")
+    )
+    out_span = gen_span(mask)
+    assert out_span.device.type == "cuda"
+
+
+def test_set_state_cross_device_fallback():
+    """Restoring an incompatible RNG state must re-seed, not crash."""
+    gen = MaskGenerator(mask_ratio=0.15, seed=42)
+    gen.set_state(torch.zeros(0, dtype=torch.uint8))  # wrong-size state
+    out = gen(torch.ones(4, 32, dtype=torch.bool))
+    assert out.shape == (4, 32)
+
+
 class TestMaskGenerator:
     @pytest.fixture
     def mask(self):

@@ -132,6 +132,7 @@ class TeacherTrainer:
             seed=trainer_cfg.get("seed", 42),
             mask_mode=masked_cfg.get("mask_mode", "random"),
             span_len=masked_cfg.get("span_len", 16),
+            device=self.device,
         )
         # Deterministic validation masks: separate generator with a fixed seed so
         # every epoch validates against the identical mask pattern.
@@ -140,6 +141,7 @@ class TeacherTrainer:
             seed=(trainer_cfg.get("seed", 42) + 10**6) & 0xFFFFFFFF,
             mask_mode=masked_cfg.get("mask_mode", "random"),
             span_len=masked_cfg.get("span_len", 16),
+            device=self.device,
         )
         self.loss_fn = MaskedMarketModelingLoss(
             loss_cfg=masked_cfg,

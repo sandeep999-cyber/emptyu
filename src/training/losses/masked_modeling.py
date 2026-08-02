@@ -24,18 +24,31 @@ class MaskGenerator:
         seed: int = 42,
         mask_mode: str = "random",
         span_len: int = 16,
+        device: Optional[torch.device] = None,
     ):
         self.mask_ratio = mask_ratio
         self.mask_mode = mask_mode
         self.span_len = max(1, int(span_len))
-        self.generator = torch.Generator()
+        self._seed = seed
+        # The generator must live on the same device as the masks: torch.rand
+        # with a CPU generator errors on CUDA tensors.
+        self.device = device
+        self.generator = torch.Generator(device=device) if device is not None else torch.Generator()
         self.generator.manual_seed(seed)
 
     def get_state(self):
         return self.generator.get_state()
 
     def set_state(self, state):
-        self.generator.set_state(state)
+        if state is None:
+            return
+        try:
+            self.generator.set_state(state)
+        except (RuntimeError, TypeError):
+            # State from a different device/RNG backend (e.g. CPU state restored
+            # onto a CUDA generator) is not restorable; re-seed deterministically
+            # instead of crashing resume.
+            self.generator.manual_seed(self._seed)
 
     def __call__(self, mask: torch.Tensor) -> torch.Tensor:
         if self.mask_mode == "span":
