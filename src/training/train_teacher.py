@@ -75,7 +75,10 @@ def main():
         # must not silently override them (regression: `x or y` never fell back).
         model_cfg = resume_configs["model_config"]
         opt_cfg = resume_configs["optimizer_config"]
-        trainer_cfg = resume_configs["trainer_config"]
+        # Manifests store the trainer config unwrapped (no "trainer" key).
+        # Normalize so the rest of main() can always use trainer_cfg["trainer"].
+        raw_trainer = resume_configs["trainer_config"]
+        trainer_cfg = raw_trainer if "trainer" in raw_trainer else {"trainer": raw_trainer}
         print(f"[Resume] Restoring configs from {resume_dir}")
         run_dir = resume_dir
 

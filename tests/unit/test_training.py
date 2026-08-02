@@ -324,7 +324,7 @@ class TestResumeConfigAuthoritative:
                         "configs": {
                             "model_config": {"model": {"d_model": 512, "feature_style_hint": "returns"}},
                             "optimizer_config": {"optimizer": {"adamw": {"lr": 5e-4}}},
-                            "trainer_config": {"trainer": {"seed": 7, "batch_size": 64, "feature_style": "returns"}},
+                            "trainer_config": {"seed": 7, "batch_size": 64, "feature_style": "returns"},
                         }
                     }
                 )
@@ -360,6 +360,50 @@ class TestResumeConfigAuthoritative:
             assert captured["trainer_cfg"]["feature_style"] == "returns"
             assert captured["trainer_cfg"]["batch_size"] == 64
             assert captured["run_dir"] == resume_dir
+
+    def test_resume_accepts_wrapped_trainer_config(self):
+        """Backward compat: manifests with a nested 'trainer' key still resume."""
+        import json
+        import sys
+        from unittest.mock import patch
+
+        from src.training import train_teacher
+
+        with tempfile.TemporaryDirectory() as tmp:
+            resume_dir = Path(tmp) / "run"
+            resume_dir.mkdir()
+            (resume_dir / "latest.json").write_text(json.dumps({"latest": "checkpoint_epoch1.pt"}))
+            (resume_dir / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "configs": {
+                            "model_config": {"model": {"d_model": 512}},
+                            "optimizer_config": {"optimizer": {"adamw": {"lr": 5e-4}}},
+                            "trainer_config": {"trainer": {"seed": 9, "batch_size": 32}},
+                        }
+                    }
+                )
+            )
+            captured = {}
+
+            class FakeTrainer:
+                def __init__(self, **kw):
+                    captured.update(kw)
+
+                def train(self):
+                    pass
+
+            with (
+                patch.object(sys, "argv", ["train_teacher", "--resume", str(resume_dir)]),
+                patch.object(train_teacher, "TeacherTrainer", FakeTrainer),
+                patch.object(train_teacher, "load_yaml", return_value={"model": {}, "trainer": {}, "optimizer": {}}),
+                patch.object(train_teacher, "experiment_registry"),
+                patch.object(train_teacher, "seed_everything"),
+            ):
+                train_teacher.main()
+
+            assert captured["trainer_cfg"]["seed"] == 9
+            assert captured["trainer_cfg"]["batch_size"] == 32
 
 
 class TestSelfContainedSmoke:
