@@ -1,5 +1,11 @@
 # Phase 2 — Teacher Foundation Model · Implementation Plan v1
 
+> **Historical design record.** Written before implementation. Where this plan
+> and `src/` disagree, the code is authoritative — see `DOCUMENTATION_AUDIT.md`
+> for the list of known divergences (e.g. stride windowing, `.npz` embedding
+> output, run-id naming, `num_workers`). Live guidance: `TRAINING_GUIDE.md`,
+> `EVALUATION_GUIDE.md`, `CHECKPOINT_FORMAT.md`, `MODEL_CARD.md`.
+
 ## 1. Objective
 
 Build the first Market Foundation Model: an encoder that learns compressed representations of market behavior from the frozen Phase 1 dataset, **without labels, indicators, or trading rules**.

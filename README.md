@@ -79,8 +79,8 @@ python -m src.evaluation.embedding.visualization --checkpoint <run_dir>
 - Objective: Masked Market Modeling (15% timestep masking; `model_returns_v1.yaml` uses contiguous-span masking)
 - Data: Futures-only (BTCUSDT + ETHUSDT train, SOLUSDT validation), seen-once
 - Splits: frozen in `storage/training/training_manifest_v1.json` — train ends `2024-11-30`, test is BTCUSDT+ETHUSDT after that date
-- Checkpoints: `models/foundation/teacher_v1/<run_id>/`
-- Embeddings: `evaluation/embedding/embeddings/<run_id>/`
+- Checkpoints: `models/foundation/teacher_v1/<run_id>/` (see `CHECKPOINT_FORMAT.md`)
+- Eval reports: `evaluation/embedding/*.json`, `evaluation/baselines/baseline_eval_*.json`, figures in `evaluation/embedding/figures/`
 
 ### Feature styles
 
@@ -102,6 +102,31 @@ autocast + gradient scaling; runs fp32 on CPU). DataLoader workers use
 `pin_memory=True` on CUDA and `persistent_workers` when `num_workers > 0`.
 
 See `Phase2_Implementation_Plan_v1.md` for full specification.
+
+## Documentation
+
+The repo is self-documenting. Read in this order:
+
+| Doc | Covers |
+|---|---|
+| `SYSTEM_OVERVIEW.md` | What this is, phases, principles, CLI table, repo map, reading order |
+| `ARCHITECTURE.md` | 8 core principles + 4 contracts |
+| `RESEARCH_PHILOSOPHY.md` | Thesis, why no labels, masking/loss design, leakage rules, non-goals |
+| `DATA_FLOW.md` | Phase 1 pipeline: download → convert → resample → align → build-lake → validate → snapshot, with CLI examples |
+| `DATASET.md` | Global HF-style data card |
+| `CONFIG_REFERENCE.md` | Every key of every config: meaning, default, allowed values, effect |
+| `MODULE_REFERENCE.md` | Every module: purpose, inputs, outputs, assumptions, side effects, failure modes, deps, config, tests |
+| `TRAINING_GUIDE.md` | Phase 2 training: smoke/full/returns, resume, checkpoint lifecycle, expected outputs |
+| `CHECKPOINT_FORMAT.md` | Run-dir layout, `.pt` state dict, `latest.json`, `manifest.json`, resume mechanics |
+| `RESEARCH_BASELINE.md` | **Frozen ground truth** for the first GPU experiment + success criteria; compare every experiment against it |
+| `EVALUATION_GUIDE.md` | Embedding probes (clustering/retrieval/linear_probe/temporal/viz) + baselines harness, how to read results |
+| `MODEL_CARD.md` | `teacher_transformer_v1` specs, data, objective, current eval results, intended use |
+| `REPRODUCIBILITY.md` | Fingerprint, manifest, configs, git, seeds — the four anchors |
+| `GPU_TRAINING_GUIDE.md` | CUDA host: setup, data, run, resume, failure recovery |
+| `COLAB_GUIDE.md` | Cell-by-cell notebook walkthrough for managed GPU |
+| `TROUBLESHOOTING.md` | Failure-mode catalog across all areas |
+| `DOCUMENTATION_AUDIT.md` | Audit of what existed, what was created, known divergences |
+| `Phase1_Implementation_Plan_v4.md`, `Phase2_Implementation_Plan_v1.md`, `walkthrough.md` | Historical design/remediation records (authoritative code = `src/`) |
 
 ## Project Structure
 
@@ -171,8 +196,25 @@ See `Phase2_Implementation_Plan_v1.md` for full specification.
 ├── logs/                          # Per-stage log files
 ├── ARCHITECTURE.md                # 8 Core Principles + 4 Contracts
 ├── DATASET.md                     # Global HF-style Data Card
+├── SYSTEM_OVERVIEW.md             # Repo-wide orientation + reading order
+├── RESEARCH_PHILOSOPHY.md         # Thesis + design rationale
+├── DATA_FLOW.md                   # Phase 1 pipeline guide
+├── CONFIG_REFERENCE.md            # Every config key documented
+├── MODULE_REFERENCE.md            # Every module documented
+├── TRAINING_GUIDE.md              # Phase 2 training guide
+├── CHECKPOINT_FORMAT.md           # Checkpoint/resume format
+├── EVALUATION_GUIDE.md            # Eval probes + baselines harness
+├── MODEL_CARD.md                  # Model spec + eval results
+├── RESEARCH_BASELINE.md           # Frozen ground truth + success criteria
+├── REPRODUCIBILITY.md             # Fingerprint/manifest/git/seed anchors
+├── GPU_TRAINING_GUIDE.md          # CUDA host training
+├── COLAB_GUIDE.md                 # Notebook walkthrough
+├── TROUBLESHOOTING.md             # Failure-mode catalog
+├── DOCUMENTATION_AUDIT.md         # Documentation audit deliverable
 ├── main.py                        # CLI entrypoint
-├── Phase2_Implementation_Plan_v1.md
+├── Phase1_Implementation_Plan_v4.md  # Historical design record
+├── Phase2_Implementation_Plan_v1.md  # Historical design record
+├── walkthrough.md                 # Historical remediation record
 └── requirements.txt
 ```
 

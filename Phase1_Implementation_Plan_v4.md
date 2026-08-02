@@ -1,6 +1,10 @@
 # Implementation Plan — Phase 1: Pure Market Foundation Model
 ## Dataset Builder & Data Lake Engine
 
+> **Historical design record.** The Phase 1 pipeline as implemented is
+> documented live in `DATA_FLOW.md`; the configs are documented in
+> `CONFIG_REFERENCE.md`. This file describes the original plan.
+
 Build a research-grade, high-throughput, self-contained dataset builder, DuckDB
 Data Lake, and PyTorch-native `MarketDataset` API to acquire, verify, resample,
 canonicalize, align, index, snapshot, and stream raw market data (USD-M Futures

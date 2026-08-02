@@ -1,5 +1,10 @@
 # Walkthrough — Phase 1: Remediation Complete
 
+> **Historical record.** Written during Phase 1 remediation. Test counts and
+> implementation details here are stale (current suite: **203 passing**). The
+> authoritative source for current behavior is `src/` + the guides in the
+> README documentation index.
+
 All audit-identified issues have been investigated and resolved.
 
 ## Resolved Issues
