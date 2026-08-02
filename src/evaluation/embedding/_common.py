@@ -46,12 +46,33 @@ def _resolve_checkpoint_path(run_dir: Path, which: str = "best") -> Path:
     return candidates[-1]
 
 
+def _resolve_run_dir(run_dir: Path, base: Optional[Path] = None) -> Path:
+    """Resolve a checkpoint run dir; if the given dir is missing or has no
+    manifest, fall back to the most recent run under the runs base dir
+    (default models/foundation/teacher_v1).
+
+    Handles an empty ``--checkpoint`` (e.g. when $CHECKPOINT_DIR was not
+    exported by the notebook) gracefully instead of erroring on ".".
+    """
+    if run_dir.exists() and (run_dir / "manifest.json").exists():
+        return run_dir
+    base = base or Path("models/foundation/teacher_v1")
+    if base.exists():
+        candidates = sorted(base.iterdir())
+        if candidates:
+            resolved = candidates[-1]
+            print(f"[eval] No manifest at {run_dir}; using latest run dir {resolved}")
+            return resolved
+    return run_dir
+
+
 def load_model_and_normalizer(
     run_dir: Path,
     device: torch.device,
     which: str = "best",
 ) -> Tuple[TeacherEncoder, FeatureNormalizer, Dict[str, Any]]:
     """Rebuild model + normalizer from a CheckpointManager run directory."""
+    run_dir = _resolve_run_dir(run_dir)
     configs = load_checkpoint_config(run_dir)
     model_cfg = configs["model_config"]
     full_model_cfg = {**model_cfg["model"], "loss": model_cfg.get("loss", {})}

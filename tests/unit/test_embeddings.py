@@ -4,6 +4,7 @@ import torch
 
 from src.models.teacher.embeddings import pool_cls, pool_mean, AttentionPooling, extract_embeddings
 from src.evaluation.embedding.clustering import evaluate_clustering
+from src.evaluation.embedding._common import _resolve_run_dir
 from src.models.teacher.encoder import TeacherEncoder
 from src.data.market_dataset import MarketDataset
 from src.training.dataloader import create_dataloader
@@ -193,3 +194,21 @@ class TestClustering:
         assert res["n_silhouette_samples"] == 2000
         assert res["silhouette"] == res["silhouette"]  # not NaN
         assert len(res["cluster_sizes"]) == 8
+
+
+class TestResolveRunDir:
+    def test_returns_valid_run_as_is(self, tmp_path):
+        run = tmp_path / "run"
+        run.mkdir()
+        (run / "manifest.json").write_text("{}")
+        assert _resolve_run_dir(run, base=tmp_path) == run
+
+    def test_falls_back_to_latest_run(self, tmp_path):
+        (tmp_path / "20260801_100000_full").mkdir()
+        (tmp_path / "20260802_072453_full").mkdir()
+        (tmp_path / "20260802_072453_full" / "manifest.json").write_text("{}")
+        resolved = _resolve_run_dir(tmp_path / "missing", base=tmp_path)
+        assert resolved == tmp_path / "20260802_072453_full"
+
+    def test_returns_input_when_no_runs_exist(self, tmp_path):
+        assert _resolve_run_dir(tmp_path / "missing", base=tmp_path) == tmp_path / "missing"
