@@ -152,8 +152,8 @@ class TeacherTrainer:
         self.num_workers = self.trainer_cfg.get("num_workers", 0)
         self.pin_memory = self.device.type == "cuda"
         self.persistent_workers = self.num_workers > 0
-        self.use_amp = bool(self.trainer_cfg.get("mixed_precision", False)) and self.device.type == "cuda"
         self.amp_dtype = self._resolve_amp_dtype()
+        self.use_amp = self.amp_dtype is not None
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
         # bf16 is only tensor-core-accelerated on Ampere+ (sm_80); on older GPUs
         # (e.g. Colab T4 / Turing sm_75) bf16 runs emulated, so fall back to fp16.
@@ -178,14 +178,19 @@ class TeacherTrainer:
         self.log.info(f"TeacherTrainer initialized (num_workers={self.num_workers}).")
 
     def _resolve_amp_dtype(self):
-        """Pick an autocast dtype suited to the GPU: bf16 on Ampere+, fp16 otherwise."""
-        if not self.use_amp:
+        """Pick an autocast dtype suited to the GPU: bf16 on Ampere+, fp16 on
+        sm_53+, None (no AMP) on older GPUs that lack fp16 compute."""
+        if not (bool(self.trainer_cfg.get("mixed_precision", False)) and self.device.type == "cuda"):
             return None
         try:
-            major, _ = torch.cuda.get_device_capability(self.device)
+            major, minor = torch.cuda.get_device_capability(self.device)
         except Exception:
-            major = 0
-        return torch.bfloat16 if major >= 8 else torch.float16
+            major, minor = 0, 0
+        if major >= 8:
+            return torch.bfloat16
+        if (major, minor) >= (5, 3):
+            return torch.float16
+        return None
 
     def _restore_from_resume(self):
         """Restore model/optimizer/scheduler/normalizer state when resuming a run."""
