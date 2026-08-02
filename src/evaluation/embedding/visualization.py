@@ -84,7 +84,7 @@ def main():
     out_dir = Path("evaluation/embedding/figures")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    for split in ["train", "validation"]:
+    for split in ["train", "validation", "test"]:
         emb_data = extract_split_embeddings(
             model, normalizer, split, args.pooling,
             configs["trainer_config"], device, max_windows=args.max_windows,

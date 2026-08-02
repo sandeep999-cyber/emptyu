@@ -52,7 +52,7 @@ def main():
     parser.add_argument("--checkpoint", type=str, required=True, help="Run dir from CheckpointManager")
     parser.add_argument("--pooling", type=str, default="mean", choices=["cls", "mean", "attention"])
     parser.add_argument("--clusters", type=int, default=8)
-    parser.add_argument("--split", type=str, default="train", choices=["train", "validation"])
+    parser.add_argument("--split", type=str, default="train", choices=["train", "validation", "test"])
     parser.add_argument("--max-windows", type=int, default=None)
     args = parser.parse_args()
 

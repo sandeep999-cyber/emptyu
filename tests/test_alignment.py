@@ -124,3 +124,33 @@ def test_calendar_fallback_generation():
     assert "day_of_week" in result.columns
     assert "is_weekend" in result.columns
     assert len(result) == 5
+
+
+def test_funding_staleness_flagged_after_frequency():
+    engine = AlignmentEngine()
+    df_klines = _make_klines(n=600)  # 10h of 1m rows
+    ts = df_klines["timestamp"].values
+    # Single funding settlement at minute 60; frequency is 8h = 480m.
+    funding = pd.DataFrame({"settlement_time": [ts[60]], "funding_rate": [0.0003]})
+    res = engine.align_symbol_data("BTCUSDT", df_klines, df_funding=funding)
+
+    stale = res["funding_rate_stale"].to_numpy()
+    # Before first settlement (60m): unobserved -> stale; after 8h (540m): stale.
+    assert stale[:60].all()
+    assert not stale[60:60 + 479].all()  # fresh window within 8h
+    assert stale[540:].all()  # beyond 8h the carried value is stale
+    # The carried value is still present as context.
+    assert res.loc[540, "funding_rate"] == 0.0003
+
+
+def test_open_interest_staleness_frequency_5m():
+    engine = AlignmentEngine()
+    df_klines = _make_klines(n=60)
+    ts = df_klines["timestamp"].values
+    oi = pd.DataFrame({"timestamp": [ts[0]], "open_interest": [123.0]})
+    res = engine.align_symbol_data("BTCUSDT", df_klines, df_open_interest=oi)
+
+    stale = res["open_interest_stale"].to_numpy()
+    # 5m frequency: rows 0..5 fresh, beyond that stale.
+    assert not stale[:5].any()
+    assert stale[5:].all()

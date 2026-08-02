@@ -247,7 +247,6 @@ def cmd_build_lake(args):
             metadata_manager.save_json(stats, meta_dir / "statistics_v1.json")
 
             import shutil, json as _json
-            mkt_state_path = Path(config.__class__.__module__).resolve().parent.parent / "configs" / "market_state_schema_v1.json"
             mkt_state_src = config._CONFIGS_DIR / "market_state_schema_v1.json" if hasattr(config, '_CONFIGS_DIR') else Path(__file__).resolve().parent.parent / "configs" / "market_state_schema_v1.json"
             if mkt_state_src.exists():
                 shutil.copy2(str(mkt_state_src), str(meta_dir / "market_state_schema_v1.json"))
@@ -318,6 +317,7 @@ def cmd_snapshot(args):
         train_symbols=config.dataset.get("train_symbols"),
         val_symbols=config.dataset.get("val_symbols"),
         test_symbols=config.dataset.get("test_symbols"),
+        train_end_date=config.dataset.get("train_end_date", "2024-11-30"),
     )
     try:
         snap_path = snapshot_manager.create_snapshot(

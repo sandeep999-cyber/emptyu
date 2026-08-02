@@ -15,6 +15,17 @@ class CheckpointManager:
         self.run_dir = run_dir
         self.configs = configs
         self.history: list = []
+        self._load_existing_history()
+
+    def _load_existing_history(self):
+        """Load prior manifest history when resuming a run, so new saves append."""
+        manifest_path = self.run_dir / "manifest.json"
+        if manifest_path.exists():
+            try:
+                manifest = json.loads(manifest_path.read_text())
+                self.history = manifest.get("checkpoints", [])
+            except Exception:
+                self.history = []
 
     def _ensure_dir(self):
         self.run_dir.mkdir(parents=True, exist_ok=True)
@@ -41,6 +52,8 @@ class CheckpointManager:
         train_loss: Optional[float],
         val_loss: Optional[float],
         is_best: bool = False,
+        metrics: Optional[Dict[str, Any]] = None,
+        val_mask_generator_state: Any = None,
     ):
         self._ensure_dir()
 
@@ -52,22 +65,27 @@ class CheckpointManager:
             "scheduler_state": scheduler.state_dict() if scheduler else None,
             "normalizer_state": normalizer_state,
             "mask_generator_state": mask_generator_state,
+            "val_mask_generator_state": val_mask_generator_state,
             "train_loss": train_loss,
             "val_loss": val_loss,
+            "metrics": metrics,
         }
         path = self.run_dir / f"checkpoint_epoch{epoch}.pt"
         torch.save(state, path)
         ckpt_hash = self._compute_hash(path)
 
         # Update manifest
-        self.history.append({
+        history_entry = {
             "epoch": epoch,
             "step": step,
             "path": str(path.name),
             "sha256": ckpt_hash,
             "train_loss": train_loss,
             "val_loss": val_loss,
-        })
+        }
+        if metrics:
+            history_entry["metrics"] = metrics
+        self.history.append(history_entry)
         self._write_manifest()
 
         if is_best:
@@ -108,4 +126,12 @@ class CheckpointManager:
             optimizer.load_state_dict(state["optimizer_state"])
         if scheduler and state.get("scheduler_state"):
             scheduler.load_state_dict(state["scheduler_state"])
-        return state["epoch"], state["step"], state.get("normalizer_state"), state.get("mask_generator_state"), state.get("train_loss"), state.get("val_loss")
+        return (
+            state["epoch"],
+            state["step"],
+            state.get("normalizer_state"),
+            state.get("mask_generator_state"),
+            state.get("train_loss"),
+            state.get("val_loss"),
+            state.get("val_mask_generator_state"),
+        )

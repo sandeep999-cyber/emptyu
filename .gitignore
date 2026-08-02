@@ -4,4 +4,17 @@ __pycache__/
 .benchmarks/
 logs/
 test_download.zip
-storage/
+
+# Raw/canonical/lake data and DuckDB indexes stay local; the frozen training
+# contract (manifest, fingerprint, snapshot ledger) is version-controlled.
+storage/*
+!storage/training/
+storage/training/*
+!storage/training/*.json
+!storage/training/snapshots/
+!storage/training/snapshots/**
+
+# Training/eval artifacts are regenerable; configs and source are tracked.
+models/
+evaluation/embedding/
+evaluation/baselines/

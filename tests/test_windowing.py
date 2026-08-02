@@ -42,3 +42,21 @@ def test_windowing_rejects_duplicates():
 
     with pytest.raises(ValueError, match="non-positive delta"):
         engine.create_windows(features, feature_mask, timestamps)
+
+
+def test_windowing_flags_positions_before_suspicious_gap():
+    """Positions whose NEXT gap exceeds ~2x the expected step are masked out."""
+    engine = WindowingEngine({"sequence_length": 6, "stride": 1, "max_gap_ms": 600000})
+    features = np.arange(12).reshape(6, 2).astype(np.float32)
+    feature_mask = np.ones((6, 2), dtype=bool)
+    # Expected step 60s; one 300s gap between index 2 and 3 (5x step).
+    timestamps = np.array([0, 60000, 120000, 420000, 480000, 540000], dtype=np.int64)
+
+    windows = engine.create_windows(features, feature_mask, timestamps)
+    assert len(windows) == 1
+    mask = windows[0]["mask"]
+    # Index 2 is followed by the big gap -> flagged; the last position cannot be
+    # judged but is observed, so it stays valid.
+    assert not bool(mask[2])  # followed by the big gap -> flagged
+    assert bool(mask[0])
+    assert bool(mask[-1])  # last position cannot be judged but is observed

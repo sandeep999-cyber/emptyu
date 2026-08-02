@@ -1,5 +1,6 @@
 import pytest
 import torch
+import numpy as np
 
 from src.training.losses.masked_modeling import MaskedMarketModelingLoss
 
@@ -75,3 +76,38 @@ class TestMaskedMarketModelingLoss:
         losses = loss_fn(reconstruction, features_norm, features_raw, feature_mask, masked_positions)
         losses["total"].backward()
         assert pred.grad is not None
+
+    def test_reconstruct_calendar_false_skips_calendar(self):
+        cfg = {**LOSS_CFG, "reconstruct_calendar": False}
+        loss_fn = MaskedMarketModelingLoss(cfg, d_model=512, device=torch.device("cpu"))
+        B, T = 2, 32
+        reconstruction = {
+            "price": torch.randn(B, T, 5),
+            "funding_oi": torch.randn(B, T, 2),
+            "calendar": {f: torch.randn(B, T, spec["classes"]) for f, spec in LOSS_CFG["calendar"].items()},
+        }
+        features_norm = torch.randn(B, T, 15)
+        features_raw = torch.randint(0, 60, (B, T, 15)).float()
+        feature_mask = torch.ones(B, T, 15, dtype=torch.bool)
+        masked_positions = torch.rand(B, T) < 0.5
+
+        losses = loss_fn(reconstruction, features_norm, features_raw, feature_mask, masked_positions)
+        assert "calendar" not in losses
+        assert any(f in losses for f in LOSS_CFG["calendar"]) is False
+        # total must equal the weighted price + funding_oi terms only.
+        expected = losses["price"] + losses["funding_oi"]
+        assert np.isclose(losses["total"].item(), expected.item())
+
+    def test_reconstruct_calendar_default_includes_calendar(self, loss_fn):
+        B, T = 2, 32
+        reconstruction = {
+            "price": torch.randn(B, T, 5),
+            "funding_oi": torch.randn(B, T, 2),
+            "calendar": {f: torch.randn(B, T, spec["classes"]) for f, spec in LOSS_CFG["calendar"].items()},
+        }
+        features_norm = torch.randn(B, T, 15)
+        features_raw = torch.randint(0, 60, (B, T, 15)).float()
+        feature_mask = torch.ones(B, T, 15, dtype=torch.bool)
+        masked_positions = torch.rand(B, T) < 0.5
+        losses = loss_fn(reconstruction, features_norm, features_raw, feature_mask, masked_positions)
+        assert "calendar" in losses

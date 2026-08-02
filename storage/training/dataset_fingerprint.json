@@ -1,0 +1,13 @@
+{
+  "fingerprint": "328a7b67b070b95e47ba450452032a93dfa410431e0cf329de6a4ac7b5ae3875",
+  "file_count": 510,
+  "dataset_versions": {
+    "snapshot": "2026-07-30",
+    "alignment_version": "alignment_v1.yaml",
+    "feature_builder_version": "v1",
+    "windowing_version": "windowing_v1.yaml",
+    "canonical_schema_version": "v1",
+    "market_state_schema_version": "v1",
+    "modality_registry": "modalities_v1.yaml"
+  }
+}

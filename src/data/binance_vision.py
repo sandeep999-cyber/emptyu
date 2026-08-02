@@ -135,15 +135,39 @@ class BinanceVisionDownloader:
 
         async with aiohttp.ClientSession() as session:
             success = await self.download_file(session, url, zip_path)
-            if success:
-                await self.download_file(session, checksum_url, checksum_path)
-                # Verify checksum if available
-                if checksum_path.exists() and checksum_path.stat().st_size > 0:
-                    if not await self.verify_checksum(zip_path, checksum_path):
-                        zip_path.unlink()
-                        return None
-                return zip_path
-            return None
+            if not success:
+                return None
+            checksum_ok = await self.download_file(session, checksum_url, checksum_path)
+            if not checksum_ok or not checksum_path.exists() or checksum_path.stat().st_size == 0:
+                zip_path.unlink(missing_ok=True)
+                return None
+            if not await self.verify_checksum(zip_path, checksum_path):
+                zip_path.unlink(missing_ok=True)
+                return None
+            return zip_path
+
+    async def download_dataset_period(
+        self,
+        market: str,
+        dataset_type: str,
+        symbol: str,
+        year: int,
+        months: Optional[List[int]] = None,
+    ) -> List[Path]:
+        """Download all monthly archives for a symbol/year, honoring ``concurrency_limit``.
+
+        Months run 1..12 unless a subset is given. Missing monthly archives for a
+        symbol/dataset (404) are treated as absent and skipped.
+        """
+        month_list = months or list(range(1, 13))
+        semaphore = asyncio.Semaphore(max(1, self.concurrency))
+
+        async def bounded(month: int) -> Optional[Path]:
+            async with semaphore:
+                return await self.download_monthly_archive(market, symbol, dataset_type, year, month)
+
+        paths = await asyncio.gather(*(bounded(m) for m in month_list))
+        return [p for p in paths if p is not None]
 
 
 downloader = BinanceVisionDownloader()

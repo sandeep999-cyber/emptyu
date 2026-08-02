@@ -53,3 +53,40 @@ class TestMaskGenerator:
         gen = MaskGenerator(0.5)
         masked = gen(m)
         assert (~masked[:, -50:]).all()
+
+
+class TestMaskGeneratorSpan:
+    def test_span_contiguity(self):
+        m = torch.ones(20, 512, dtype=torch.bool)
+        gen = MaskGenerator(mask_ratio=0.15, seed=42, mask_mode="span", span_len=16)
+        masked = gen(m)
+        # Masked positions must form contiguous runs of length <= span_len.
+        for row in masked:
+            idxs = row.nonzero(as_tuple=False).view(-1)
+            if len(idxs) == 0:
+                continue
+            breaks = (idxs[1:] - idxs[:-1] != 1).nonzero(as_tuple=False).view(-1).tolist()
+            split_points = [0] + [i + 1 for i in breaks] + [len(idxs)]
+            runs = [idxs[split_points[i]:split_points[i + 1]] for i in range(len(split_points) - 1)]
+            assert runs, "expected at least one masked run"
+            assert max(len(r) for r in runs) <= 16, "each run must be at most span_len long"
+
+    def test_span_only_valid_positions(self):
+        m = torch.ones(10, 100, dtype=torch.bool)
+        m[:, -40:] = False
+        gen = MaskGenerator(mask_ratio=0.3, seed=7, mask_mode="span", span_len=16)
+        masked = gen(m)
+        assert (~masked[:, -40:]).all()
+
+    def test_span_rate(self):
+        m = torch.ones(50, 512, dtype=torch.bool)
+        gen = MaskGenerator(mask_ratio=0.15, seed=1, mask_mode="span", span_len=16)
+        masked = gen(m)
+        rate = masked.sum().item() / m.sum().item()
+        assert 0.05 <= rate <= 0.30
+
+    def test_span_deterministic(self):
+        m = torch.ones(10, 128, dtype=torch.bool)
+        g1 = MaskGenerator(0.15, seed=42, mask_mode="span", span_len=16)
+        g2 = MaskGenerator(0.15, seed=42, mask_mode="span", span_len=16)
+        assert torch.equal(g1(m.clone()), g2(m.clone()))

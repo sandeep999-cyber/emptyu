@@ -5,6 +5,7 @@ trainer:
   device: auto
   seed: 42
   market: futures
+  mixed_precision: true
   # Stride: sampling over frozen stride-1 window set, NOT re-invoking windowing_engine
   train_window_stride: 16
   val_window_stride: 16

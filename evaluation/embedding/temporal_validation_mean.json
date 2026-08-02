@@ -1,9 +1,0 @@
-{
-  "n_samples": 256,
-  "adjacent_mean_cos": 0.9572,
-  "adjacent_std_cos": 0.0486,
-  "random_mean_cos": 0.8998,
-  "separation_auc": 0.8113,
-  "adjacent_pairs": 255,
-  "random_pairs": 2560
-}

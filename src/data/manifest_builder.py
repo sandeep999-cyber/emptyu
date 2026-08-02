@@ -17,14 +17,14 @@ class ManifestBuilder:
         train_symbols: Optional[List[str]] = None,
         val_symbols: Optional[List[str]] = None,
         test_symbols: Optional[List[str]] = None,
-        train_end_date: str = "2024-12-31",
+        train_end_date: str = "2024-11-30",
         seed: int = 42,
         file_hashes: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Build training_manifest_v1.json dictionary locking all artifact versions and file hashes."""
         train_symbols = train_symbols or ["BTCUSDT", "ETHUSDT"]
         val_symbols = val_symbols or ["SOLUSDT"]
-        test_symbols = test_symbols or ["DOGEUSDT"]
+        test_symbols = test_symbols or ["BTCUSDT", "ETHUSDT"]
 
         manifest = {
             "training_manifest": {
@@ -67,7 +67,7 @@ class ManifestBuilder:
         train_symbols: Optional[List[str]] = None,
         val_symbols: Optional[List[str]] = None,
         test_symbols: Optional[List[str]] = None,
-        train_end_date: str = "2024-12-31",
+        train_end_date: str = "2024-11-30",
         seed: int = 42,
     ) -> Dict[str, Any]:
         """Build manifest with file hashes fetched from the database index (filtered by snapshot symbols)."""

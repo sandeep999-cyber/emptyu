@@ -2,10 +2,12 @@
 
 import argparse
 import time
+from pathlib import Path
 from typing import Any, Dict
 import numpy as np
 import psutil
 import torch
+from src.config import config
 from src.data.market_dataset import MarketDataset
 from src.training.dataloader import create_dataloader
 
@@ -57,25 +59,6 @@ class BenchmarkSuite:
             "mb_per_sec": (total_bytes / (1024 * 1024)) / elapsed,
             "peak_ram_mb": round(ram_after - ram_before, 2),
             "cpu_percent": round((cpu_before + cpu_after) / 2, 1),
-        }
-
-    def benchmark_duckdb_query(
-        self, dataset: MarketDataset, num_queries: int = 50,
-    ) -> Dict[str, Any]:
-        import duckdb
-        features = dataset.windows[0]["features"] if len(dataset) > 0 else np.zeros((100, 15), dtype=np.float32)
-        conn = duckdb.connect(":memory:")
-        conn.execute("CREATE TABLE t AS SELECT * FROM read_parquet(?)", ["-"])
-
-        start = time.time()
-        for _ in range(num_queries):
-            conn.execute("SELECT count(*) FROM (VALUES (1),(2),(3))")
-        elapsed = time.time() - start
-        conn.close()
-
-        return {
-            "duckdb_query_time_ms": round((elapsed / num_queries) * 1000, 3) if num_queries else 0.0,
-            "duckdb_queries_per_sec": num_queries / max(elapsed, 0.0001),
         }
 
 

@@ -17,10 +17,25 @@ from sklearn.metrics import balanced_accuracy_score
 
 # feature_order indices (market_state_schema_v1.json)
 _IDX_HIGH, _IDX_LOW, _IDX_CLOSE, _IDX_VOLUME = 1, 2, 3, 4
+# returns-style layout (feature_builder.py "returns"): 0 log_return, 1 hl_range, 3 log_volume
+_RET_LOG_RET, _RET_RANGE, _RET_LOG_VOLUME = 0, 1, 3
 
 
-def window_stats(features: np.ndarray) -> dict:
-    """Per-window scalar stats from raw (unnormalized) window features [T, 15]."""
+def window_stats(features: np.ndarray, style: str = "raw") -> dict:
+    """Per-window scalar stats from (unnormalized) window features [T, 15].
+
+    ``raw`` reads the OHLCV price/volume columns; ``returns`` derives the same
+    scalars from the stationary return-style features so probe pseudo-labels
+    stay meaningful for both feature styles.
+    """
+    if style == "returns":
+        lr = features[:, _RET_LOG_RET]
+        lr = lr[np.isfinite(lr)]
+        return {
+            "volatility": float(np.std(lr)) if len(lr) else 0.0,
+            "range": float(np.mean(features[:, _RET_RANGE])),
+            "volume": float(np.mean(np.expm1(np.clip(features[:, _RET_LOG_VOLUME], 0.0, None)))),
+        }
     close = features[:, _IDX_CLOSE]
     high = features[:, _IDX_HIGH]
     low = features[:, _IDX_LOW]
@@ -87,7 +102,8 @@ def _extract_with_labels(model, normalizer, split, pooling, trainer_cfg, device,
     from src.evaluation.embedding._common import build_split_dataset, extract_split_embeddings
 
     dataset = build_split_dataset(split, trainer_cfg, max_windows)
-    stats = [window_stats(w["features"]) for w in dataset.windows]
+    style = trainer_cfg.get("feature_style", "raw")
+    stats = [window_stats(w["features"], style=style) for w in dataset.windows]
     emb = extract_split_embeddings(
         model, normalizer, split, pooling, trainer_cfg, device, max_windows=max_windows,
     )

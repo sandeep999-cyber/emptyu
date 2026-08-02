@@ -17,7 +17,7 @@ from src.models.teacher.encoder import TeacherEncoder
 from src.models.teacher.embeddings import extract_embeddings
 from src.training.dataloader import create_dataloader
 from src.training.normalizer import FeatureNormalizer
-from src.training.trainer import _build_windows_for_symbol, _load_manifest
+from src.training.trainer import _build_windows_for_symbol, _load_manifest, _date_to_ms
 from src.data.market_dataset import MarketDataset
 
 
@@ -72,7 +72,13 @@ def build_split_dataset(
     trainer_cfg: Dict[str, Any],
     max_windows: Optional[int] = None,
 ) -> MarketDataset:
-    """Rebuild a dataset for a manifest split through the frozen pipeline."""
+    """Rebuild a dataset for a manifest split through the frozen pipeline.
+
+    Time-split awareness: the "train" split is capped at
+    ``time_split.train_end`` and the "test" split starts at or after that
+    boundary, so evaluation matches the trainer's causal split exactly.
+    Validation uses an unseen symbol and is unbounded in time.
+    """
     manifest = _load_manifest()
     symbols = manifest["splits"][split]["symbols"]
     market = trainer_cfg.get("market", "futures")
@@ -81,9 +87,25 @@ def build_split_dataset(
         if split == "train"
         else trainer_cfg.get("val_window_stride", 16)
     )
+    time_split = manifest["splits"].get("time_split") or {}
+    train_end = time_split.get("train_end")
+    style = trainer_cfg.get("feature_style", "raw")
+    seed = trainer_cfg.get("seed", 42)
+
+    max_end_ms = None
+    min_start_ms = None
+    if split == "train" and train_end:
+        max_end_ms = _date_to_ms(train_end)
+    elif split == "test" and train_end:
+        min_start_ms = _date_to_ms(train_end)
+
     windows = []
     for sym in symbols:
-        ds = _build_windows_for_symbol(sym, market, stride, max_windows)
+        ds = _build_windows_for_symbol(
+            sym, market, stride, max_windows,
+            max_end_ms=max_end_ms, min_start_ms=min_start_ms,
+            feature_style=style, seed=seed,
+        )
         windows.extend(ds.windows)
     return MarketDataset(windows)
 

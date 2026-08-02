@@ -31,11 +31,19 @@ def pool_mean(latent: torch.Tensor, key_padding_mask: torch.Tensor, t_data: int)
 
 
 class AttentionPooling(nn.Module):
-    """Learned query over data positions (mask-aware)."""
+    """Learned query over data positions (mask-aware).
 
-    def __init__(self, d_model: int):
+    Note: this layer is never trained by the current training loop; it is
+    initialized with a fixed seed so that extraction is deterministic, but
+    the pooled output reflects the untrained (random) query rather than a
+    learned attention. Prefer ``cls`` or ``mean`` for research pooling.
+    """
+
+    def __init__(self, d_model: int, seed: int = 42):
         super().__init__()
-        self.query = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
+        gen = torch.Generator()
+        gen.manual_seed(seed)
+        self.query = nn.Parameter(torch.randn(1, 1, d_model, generator=gen) * 0.02)
         self.linear = nn.Linear(d_model, d_model)
 
     def forward(self, latent: torch.Tensor, key_padding_mask: torch.Tensor, t_data: int) -> torch.Tensor:
@@ -74,7 +82,6 @@ def extract_embeddings(
     end_tss = []
 
     attn_pool = AttentionPooling(model.d_model).to(device) if pooling == "attention" else None
-
     with torch.no_grad():
         for batch in dataloader:
             features = batch["features"].to(device)

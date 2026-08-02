@@ -55,3 +55,28 @@ class TestBinanceVisionDownloader:
         url = downloader._build_url("spot", "funding", "BTCUSDT", "BTCUSDT-fundingRate-2024-01.zip")
         assert "spot" in url
         assert "fundingRate/BTCUSDT" in url
+
+    def test_download_dataset_period_concurrency(self):
+        import asyncio
+        from src.data.binance_vision import BinanceVisionDownloader
+        with tempfile.TemporaryDirectory() as tmpdir:
+            downloader = BinanceVisionDownloader(raw_dir=Path(tmpdir) / "raw")
+            downloader.concurrency = 2
+            active = 0
+            max_active = 0
+            calls = []
+
+            async def fake_archive(market, symbol, dataset_type, year, month):
+                nonlocal active, max_active
+                active += 1
+                max_active = max(max_active, active)
+                calls.append(month)
+                await asyncio.sleep(0.02)
+                active -= 1
+                return Path(tmpdir) / f"archive-{month}.zip"
+
+            downloader.download_monthly_archive = fake_archive
+            paths = asyncio.run(downloader.download_dataset_period("futures", "klines", "BTCUSDT", 2024, months=[1, 2, 3]))
+            assert len(paths) == 3
+            assert set(calls) == {1, 2, 3}
+            assert max_active <= 2, "concurrency limit must be respected"

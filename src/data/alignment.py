@@ -57,9 +57,17 @@ class AlignmentEngine:
         self, df_aligned: pd.DataFrame, df_modality: Optional[pd.DataFrame],
         value_key: str, policy: Dict[str, Any],
     ) -> pd.DataFrame:
-        """ASOF-merge a sub-minute modality backward, then forward-fill."""
+        """ASOF-merge a sub-minute modality backward, then forward-fill.
+
+        Forward-filled values that have gone stale (older than the modality's
+        declared ``frequency``) are flagged in a ``<value_key>_stale`` boolean
+        column so downstream consumers (feature_builder) can mark them
+        unobserved in the feature mask. The carried value itself is retained
+        as model input context.
+        """
         if df_modality is None or df_modality.empty:
             df_aligned[value_key] = np.nan
+            df_aligned[f"{value_key}_stale"] = False
             return df_aligned
 
         df_m = df_modality.copy()
@@ -83,9 +91,38 @@ class AlignmentEngine:
         df_m.dropna(subset=["timestamp"], inplace=True)
         df_m.sort_values("timestamp", inplace=True)
 
+        # Track the observation timestamp of the asof-matched source row so the
+        # age of each forward-filled value can be computed.
+        df_m["_src_ts"] = df_m["timestamp"]
+
         df_aligned = pd.merge_asof(df_aligned, df_m, on="timestamp", direction="backward")
+        # Age since the real (non-carried) observation; NaN where no observation yet.
+        age_ms = (df_aligned["timestamp"] - df_aligned["_src_ts"]).astype("float64")
+        max_stale_ms = self._parse_frequency_ms(policy.get("frequency"))
+        stale = age_ms.isna() | (age_ms > max_stale_ms)
+        df_aligned[f"{value_key}_stale"] = stale.to_numpy(dtype=bool)
+        # Forward-fill values so the latest known value is available as context.
         df_aligned[value_key] = df_aligned[value_key].ffill()
+        df_aligned.drop(columns=["_src_ts"], inplace=True)
         return df_aligned
+
+    @staticmethod
+    def _parse_frequency_ms(frequency: Optional[str]) -> int:
+        """Parse a frequency like '8h', '5m', '30s' into milliseconds."""
+        if not frequency:
+            return 0
+        freq = str(frequency).strip().lower()
+        try:
+            amount = int(freq.rstrip("hms"))
+        except ValueError:
+            return 0
+        if freq.endswith("h"):
+            return amount * 3600 * 1000
+        if freq.endswith("m"):
+            return amount * 60 * 1000
+        if freq.endswith("s"):
+            return amount * 1000
+        return 0
 
     def _align_derived_calendar(
         self, df_aligned: pd.DataFrame, df_calendar: Optional[pd.DataFrame],
