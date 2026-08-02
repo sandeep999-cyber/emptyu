@@ -106,6 +106,22 @@ class TestTeacherTrainer:
         assert mock_trainer.model is not None
         assert mock_trainer.device == torch.device("cpu")
 
+    def test_amp_dtype_disabled(self, mock_trainer):
+        assert mock_trainer.use_amp is False
+        assert mock_trainer.amp_dtype is None
+
+    def test_amp_dtype_bf16_on_ampere_plus(self, mock_trainer):
+        mock_trainer.use_amp = True
+        mock_trainer.device = torch.device("cuda")
+        with patch("torch.cuda.get_device_capability", return_value=(8, 0)):
+            assert mock_trainer._resolve_amp_dtype() == torch.bfloat16
+
+    def test_amp_dtype_fp16_on_pre_ampere(self, mock_trainer):
+        mock_trainer.use_amp = True
+        mock_trainer.device = torch.device("cuda")
+        with patch("torch.cuda.get_device_capability", return_value=(7, 5)):
+            assert mock_trainer._resolve_amp_dtype() == torch.float16
+
     def test_model_forward(self, mock_trainer):
         mock_trainer.model.eval()
         features = torch.randn(1, 512, 15)

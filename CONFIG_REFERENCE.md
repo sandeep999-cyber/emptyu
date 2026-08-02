@@ -195,7 +195,7 @@ Calendar CE spec mirrors `model_v1.yaml` (still needed by the head even when
 | `trainer.device` | device | `auto` | `auto`, `cuda`, `cpu` | `auto` → cuda if available else cpu |
 | `trainer.seed` | run seed | `42` | int | all RNGs |
 | `trainer.market` | market to train on | `futures` | `futures`, `spot` | which canonical tree is read |
-| `trainer.mixed_precision` | AMP bf16 + grad scaling on CUDA | `true` | bool | speed/memory on GPU; ignored on CPU |
+| `trainer.mixed_precision` | AMP autocast + grad scaling on CUDA | `true` | bool | speed/memory on GPU; ignored on CPU. dtype auto: bf16 (sm_80+) else fp16 |
 | `trainer.train_window_stride` | stride over frozen window set for train | `16` | int ≥ 1 | # train windows (≈ density) |
 | `trainer.val_window_stride` | stride for validation | `16` | int ≥ 1 | # val windows |
 | `trainer.max_train_windows` | deterministic cap | `null` | int or `null` | smoke caps to 256; `null` = no cap |

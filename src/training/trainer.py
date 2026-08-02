@@ -153,7 +153,12 @@ class TeacherTrainer:
         self.pin_memory = self.device.type == "cuda"
         self.persistent_workers = self.num_workers > 0
         self.use_amp = bool(self.trainer_cfg.get("mixed_precision", False)) and self.device.type == "cuda"
+        self.amp_dtype = self._resolve_amp_dtype()
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
+        # bf16 is only tensor-core-accelerated on Ampere+ (sm_80); on older GPUs
+        # (e.g. Colab T4 / Turing sm_75) bf16 runs emulated, so fall back to fp16.
+        if self.use_amp:
+            self.log.info(f"AMP dtype: {self.amp_dtype}")
         # Micro-batching with gradient accumulation: `batch_size` stays the
         # effective batch (optimizer step + scheduler step + LR curve), while
         # `micro_batch_size` bounds per-step VRAM. Default = no accumulation.
@@ -171,6 +176,16 @@ class TeacherTrainer:
         })
         self._restore_from_resume()
         self.log.info(f"TeacherTrainer initialized (num_workers={self.num_workers}).")
+
+    def _resolve_amp_dtype(self):
+        """Pick an autocast dtype suited to the GPU: bf16 on Ampere+, fp16 otherwise."""
+        if not self.use_amp:
+            return None
+        try:
+            major, _ = torch.cuda.get_device_capability(self.device)
+        except Exception:
+            major = 0
+        return torch.bfloat16 if major >= 8 else torch.float16
 
     def _restore_from_resume(self):
         """Restore model/optimizer/scheduler/normalizer state when resuming a run."""
@@ -321,7 +336,7 @@ class TeacherTrainer:
                 corrupted = corrupted.masked_fill(masked_positions.unsqueeze(-1), 0.0)
 
                 autocast = (
-                    torch.autocast(device_type=self.device.type, dtype=torch.bfloat16)
+                    torch.autocast(device_type=self.device.type, dtype=self.amp_dtype)
                     if self.use_amp
                     else nullcontext()
                 )

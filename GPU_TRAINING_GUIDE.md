@@ -60,7 +60,10 @@ After moving data, always run `python main.py validate` and confirm
 Defaults in `configs/trainer_v1.yaml` already target GPU:
 
 - `device: auto` → `cuda` when available.
-- `mixed_precision: true` → bf16 autocast + `GradScaler` on CUDA.
+- `mixed_precision: true` → AMP autocast + `GradScaler` on CUDA. The autocast
+  dtype is chosen automatically: **bf16 on Ampere+ (sm_80+), fp16 on older
+  GPUs** (e.g. Colab T4 / Turing sm_75, which has no bf16 tensor cores and
+  would otherwise run bf16 emulated at ~fp32 speed).
 - `num_workers` → set to a sensible value for your machine (common choice:
   CPU core count); `pin_memory` and `persistent_workers` are enabled
   automatically on CUDA.
