@@ -21,23 +21,41 @@ def _derive_regime_labels(emb_data: dict) -> np.ndarray:
     return (norms >= median).astype(np.int32)
 
 
-def evaluate_clustering(emb_data: dict, n_clusters: int = 8) -> dict:
+def evaluate_clustering(emb_data: dict, n_clusters: int = 8, max_silhouette_samples: int = 8000) -> dict:
+    """Cluster pooled embeddings with KMeans and score with silhouette/AMI.
+
+    KMeans runs on the full embedding set, but silhouette/AMI are computed
+    on a seeded subsample when the dataset is large: silhouette_score builds
+    a dense N x N distance matrix, so full-size runs on e.g. 65k train
+    windows would require ~34 GB and crash the runtime.
+    """
     embeddings = emb_data["embedding"]
-    if len(embeddings) < n_clusters:
-        return {"error": f"Too few samples ({len(embeddings)}) for {n_clusters} clusters"}
+    n = len(embeddings)
+    if n < n_clusters:
+        return {"error": f"Too few samples ({n}) for {n_clusters} clusters"}
 
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
     labels = kmeans.fit_predict(embeddings)
-    sil = float(silhouette_score(embeddings, labels))
+
+    sil_emb = embeddings
+    sil_labels = labels
+    sil_idx = np.arange(n)
+    if n > max_silhouette_samples:
+        rng = np.random.default_rng(0)
+        sil_idx = rng.choice(n, max_silhouette_samples, replace=False)
+        sil_emb = embeddings[sil_idx]
+        sil_labels = labels[sil_idx]
+    sil = float(silhouette_score(sil_emb, sil_labels))
 
     pseudo_labels = _derive_regime_labels(emb_data)
-    ami = float(adjusted_mutual_info_score(pseudo_labels, labels))
+    ami = float(adjusted_mutual_info_score(pseudo_labels[sil_idx], sil_labels))
 
     cluster_counts = {int(k): int(v) for k, v in zip(*np.unique(labels, return_counts=True))}
 
     return {
         "n_clusters": n_clusters,
-        "n_samples": len(embeddings),
+        "n_samples": n,
+        "n_silhouette_samples": int(len(sil_emb)),
         "silhouette": round(sil, 4),
         "ami_vs_norm_regime": round(ami, 4),
         "inertia": float(kmeans.inertia_),

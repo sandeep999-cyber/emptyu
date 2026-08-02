@@ -3,6 +3,7 @@ import numpy as np
 import torch
 
 from src.models.teacher.embeddings import pool_cls, pool_mean, AttentionPooling, extract_embeddings
+from src.evaluation.embedding.clustering import evaluate_clustering
 from src.models.teacher.encoder import TeacherEncoder
 from src.data.market_dataset import MarketDataset
 from src.training.dataloader import create_dataloader
@@ -171,3 +172,24 @@ class TestExtractEmbeddings:
         loader = create_dataloader(ds, batch_size=2, shuffle=False, seed=42)
         result = extract_embeddings(encoder, loader, "mean", torch.device("cpu"))
         assert not np.allclose(result["embedding"][0], result["embedding"][1])
+
+
+class TestClustering:
+    def test_small_run_full(self):
+        rng = np.random.default_rng(1)
+        emb = {"embedding": rng.normal(0, 1, (500, 64)).astype(np.float32)}
+        res = evaluate_clustering(emb, n_clusters=4)
+        assert res["n_samples"] == 500
+        assert res["n_silhouette_samples"] == 500
+        assert -1.0 <= res["silhouette"] <= 1.0
+        assert -1.0 <= res["ami_vs_norm_regime"] <= 1.0
+        assert len(res["cluster_sizes"]) == 4
+
+    def test_large_run_subsamples_silhouette(self):
+        rng = np.random.default_rng(2)
+        emb = {"embedding": rng.normal(0, 1, (20000, 16)).astype(np.float32)}
+        res = evaluate_clustering(emb, n_clusters=8, max_silhouette_samples=2000)
+        assert res["n_samples"] == 20000
+        assert res["n_silhouette_samples"] == 2000
+        assert res["silhouette"] == res["silhouette"]  # not NaN
+        assert len(res["cluster_sizes"]) == 8
