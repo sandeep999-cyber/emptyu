@@ -28,7 +28,9 @@ def test_apply_writes_tuned_copy_and_leaves_source_untouched(src_yaml: Path, tmp
     cfg = yaml.safe_load(out.read_text())["trainer"]
     assert cfg["micro_batch_size"] == 64
     assert cfg["torch_compile"] is True
-    assert cfg["compile_mode"] == "reduce-overhead"
+    # CUDA-graph reduce-overhead is unsafe with this model's autograd on Colab;
+    # the tuned config always uses the safe default inductor mode (null).
+    assert cfg["compile_mode"] is None
 
     src = yaml.safe_load(src_yaml.read_text())["trainer"]
     assert src["micro_batch_size"] == 32
@@ -49,8 +51,8 @@ def test_apply_inserts_compile_mode_when_absent(src_yaml: Path, tmp_path: Path):
     out = tmp_path / "probe_config.yaml"
     _apply_recommendation(str(src_yaml), 64, True, str(out))
     lines = out.read_text().splitlines()
-    assert "  compile_mode: reduce-overhead" in lines
-    assert lines.index("  compile_mode: reduce-overhead") > lines.index("  torch_compile: true")
+    assert "  compile_mode: null" in lines
+    assert lines.index("  compile_mode: null") > lines.index("  torch_compile: true")
 
 
 def test_apply_creates_parent_dirs(src_yaml: Path, tmp_path: Path):

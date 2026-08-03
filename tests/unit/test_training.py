@@ -191,6 +191,16 @@ class TestTeacherTrainer:
         # 2 epochs x 1 train batch = 2 compiled invocations (val loop is patched out).
         assert mark.call_count >= 2, mark.call_count
 
+    def test_reduce_overhead_compile_mode_refused(self):
+        """Regression: CUDA-graph reduce-overhead crashes this model's autograd on
+        Colab (overwritten buffer error); the trainer must fall back to the safe
+        default inductor mode (None) instead of propagating it."""
+        from src.training.trainer import _resolve_compile_mode
+        assert _resolve_compile_mode("reduce-overhead") is None
+        assert _resolve_compile_mode(None) is None
+        assert _resolve_compile_mode("max-autotune") == "max-autotune"
+        assert _resolve_compile_mode("default") == "default"
+
     def test_trainer_advances_sampler_epoch(self, mock_trainer):
         """Regression: sampler epoch was stuck at 0 (same order every epoch)."""
         class SpySampler(EpochMarketSampler):

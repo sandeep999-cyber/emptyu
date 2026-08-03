@@ -30,6 +30,15 @@ from src.logger import get_stage_logger
 MANIFEST_PATH = cfg.training_dir / "training_manifest_v1.json"
 
 
+def _resolve_compile_mode(mode):
+    """Refuse CUDA-graph reduce-overhead (unsafe with this model's autograd on
+    Colab: replay overwrites pooled output buffers mid-step). Return the safe
+    default inductor mode (None) instead; all other modes pass through."""
+    if mode == "reduce-overhead":
+        return None
+    return mode
+
+
 def _load_manifest() -> dict:
     with open(MANIFEST_PATH, "r") as f:
         return json.load(f)["training_manifest"]
@@ -133,8 +142,13 @@ class TeacherTrainer:
             self.model.rope.build_cache(max_position + 1, self.device)
             self.model.rope._cache_ready = True
         if trainer_cfg.get("torch_compile", False):
+            compile_mode = _resolve_compile_mode(trainer_cfg.get("compile_mode"))
+            if trainer_cfg.get("compile_mode") == "reduce-overhead":
+                self.log.warning(
+                    "compile_mode: reduce-overhead (CUDA graphs) is unsafe with this "
+                    "model's autograd on Colab; using the default inductor mode instead.")
             self.log.info("torch.compile enabled for the teacher encoder (experimental).")
-            self.model = torch.compile(self.model, mode=trainer_cfg.get("compile_mode"))
+            self.model = torch.compile(self.model, mode=compile_mode)
         # When the encoder runs under CUDA graphs (compile_mode: reduce-overhead),
         # each replay overwrites the pooled output buffers of the previous replay.
         # autograd re-executes the graph during backward, so accessing a prior

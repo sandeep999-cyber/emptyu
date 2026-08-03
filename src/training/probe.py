@@ -49,14 +49,17 @@ def _apply_recommendation(src_path: str, micro: int, compile_on: bool, out_path:
 
     _set("micro_batch_size", str(micro))
     _set("torch_compile", "true" if compile_on else "false")
-    # CUDA graphs (reduce-overhead) cut kernel-launch overhead for the static
-    # train batch; keep compile_mode consistent with torch_compile.
-    _set("compile_mode", "reduce-overhead" if compile_on else "null")
+    # CUDA graphs (compile_mode: reduce-overhead) are unsafe with this model's
+    # autograd pattern on Colab: replay overwrites pooled output buffers mid-step
+    # ("accessing tensor output of CUDAGraphs that has been overwritten by a
+    # subsequent run"). Use the default inductor mode instead — it keeps the
+    # compile speedup without the cudagraph hazard. compile_mode: null == default.
+    _set("compile_mode", "null")
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text)
     print(f"[Probe] Wrote tuned config micro_batch={micro} torch_compile={compile_on} "
-          f"compile_mode={'reduce-overhead' if compile_on else 'null'} -> {out}")
+          f"compile_mode=null (safe default, no CUDA graphs) -> {out}")
 
 
 def _run_case(model_cfg, opt_cfg, base, micro, comp, n_train, n_val, run_dir):
@@ -64,9 +67,10 @@ def _run_case(model_cfg, opt_cfg, base, micro, comp, n_train, n_val, run_dir):
     tc.update(
         micro_batch_size=micro,
         torch_compile=comp,
-        # Probe the exact compile_mode that --apply writes, so the recommended
-        # setting is the one that was actually measured (and verified not to crash).
-        compile_mode="reduce-overhead" if comp else None,
+        # Benchmark the exact compile_mode that --apply writes. CUDA graphs
+        # (reduce-overhead) crash this model's autograd on Colab, so the probe
+        # measures the safe default inductor mode (compile_mode: null).
+        compile_mode=None,
         epochs=1,
         max_train_windows=n_train,
         max_val_windows=n_val,
@@ -138,8 +142,9 @@ def main():
                   rec["micro_batch_size"], rec["torch_compile"],
                   rec["proj_full_epoch_min"], rec["peak_vram_gb"]))
         if rec["torch_compile"]:
-            print("HINT: compile_mode: reduce-overhead is auto-set on apply for CUDA-graph "
-                  "launch overhead (safe: drop_last=True keeps the train batch static).")
+            print("HINT: inductor compilation (compile_mode: null/default) is used; "
+                  "CUDA-graph reduce-overhead is intentionally avoided because replay "
+                  "overwrites pooled buffers mid-step on this model (see error above).")
         print("NOTE: the inductor compile cache is now warm, so the training subprocess "
               "in this same session reuses it (no recompile).")
         if args.apply:
