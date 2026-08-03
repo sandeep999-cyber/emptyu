@@ -1,0 +1,18 @@
+trainer:
+  batch_size: 64
+  micro_batch_size: 32
+  epochs: 30
+  num_workers: 2
+  device: auto
+  seed: 42
+  market: futures
+  mixed_precision: true
+  train_window_stride: 16
+  val_window_stride: 16
+  max_train_windows: null
+  max_val_windows: null
+  log_every: 50
+  val_every: 1
+  checkpoint_every: 1
+  normalizer:
+    mode: zscore
