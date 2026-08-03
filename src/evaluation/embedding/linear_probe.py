@@ -212,6 +212,29 @@ def _save_cached(cache_dir: Path, train_embeddings: dict, validation_embeddings:
     (cache_dir / "complete.json").write_text(json.dumps({"version": _CACHE_VERSION}, indent=2))
 
 
+def _extract_with_oom_fallback(
+    model, normalizer, split, poolings, trainer_cfg, device, dataset, batch_size
+):
+    """Retry CUDA extraction with a smaller batch if VRAM is insufficient."""
+    from src.evaluation.embedding._common import extract_split_embeddings_multi
+
+    current = batch_size
+    while True:
+        try:
+            return extract_split_embeddings_multi(
+                model, normalizer, split, poolings, trainer_cfg, device,
+                batch_size=current, dataset=dataset,
+            )
+        except RuntimeError as exc:
+            is_oom = device.type == "cuda" and "out of memory" in str(exc).lower()
+            if not is_oom or current <= 1:
+                raise
+            torch.cuda.empty_cache()
+            current = max(1, current // 2)
+            print(f"[runtime] CUDA OOM on batch; retrying {split} with batch_size={current}",
+                  flush=True)
+
+
 def main():
     from src.evaluation.embedding._common import (
         load_model_and_normalizer, build_split_dataset, extract_split_embeddings_multi)
@@ -266,13 +289,11 @@ def main():
         print(f"[data] validation windows={len(test_ds.windows)}", flush=True)
 
         print(f"[encoder] extracting {', '.join(poolings)} from train in one pass", flush=True)
-        train_embeddings = extract_split_embeddings_multi(
-            model, normalizer, "train", poolings, trainer_cfg, device,
-            batch_size=batch_size, dataset=train_ds)
+        train_embeddings = _extract_with_oom_fallback(
+            model, normalizer, "train", poolings, trainer_cfg, device, train_ds, batch_size)
         print(f"[encoder] extracting {', '.join(poolings)} from validation in one pass", flush=True)
-        test_embeddings = extract_split_embeddings_multi(
-            model, normalizer, "validation", poolings, trainer_cfg, device,
-            batch_size=batch_size, dataset=test_ds)
+        test_embeddings = _extract_with_oom_fallback(
+            model, normalizer, "validation", poolings, trainer_cfg, device, test_ds, batch_size)
         if not args.no_cache:
             _save_cached(cache_dir, train_embeddings, test_embeddings, train_stats, test_stats)
             print(f"[cache] saved {cache_dir}", flush=True)
