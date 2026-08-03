@@ -75,6 +75,7 @@ def main():
     parser.add_argument("--pooling", type=str, default="mean", choices=["cls", "mean", "attention"])
     parser.add_argument("--method", type=str, default="pca", choices=["pca", "tsne"])
     parser.add_argument("--max-windows", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=32)
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -88,6 +89,7 @@ def main():
         emb_data = extract_split_embeddings(
             model, normalizer, split, args.pooling,
             configs["trainer_config"], device, max_windows=args.max_windows,
+            batch_size=args.batch_size,
         )
         if len(emb_data["embedding"]) == 0:
             continue
