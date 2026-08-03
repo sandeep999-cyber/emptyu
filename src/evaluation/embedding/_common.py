@@ -156,14 +156,14 @@ def extract_split_embeddings(
 
     class _NormalizedDataset(MarketDataset):
         def __getitem__(self, idx: int) -> Dict[str, Any]:
-            item = super().__getitem__(idx)
-            feats = item["features"]
+            window = self.windows[idx]
+            feats = torch.from_numpy(window["features"]).float()
             flat = feats.reshape(-1, feats.shape[-1])
             return {
                 "features": normalizer.transform(flat).reshape(feats.shape),
-                "timestamps": item["timestamps"],
-                "mask": item["mask"],
-                "metadata": item["metadata"],
+                "timestamps": torch.from_numpy(window["timestamps"]).long(),
+                "mask": torch.from_numpy(window["mask"]).bool(),
+                "metadata": window.get("metadata", {}),
             }
 
     norm_dataset = _NormalizedDataset(dataset.windows)
@@ -191,14 +191,14 @@ def extract_split_embeddings_multi(
 
     class _NormalizedDataset(MarketDataset):
         def __getitem__(self, idx: int) -> Dict[str, Any]:
-            item = super().__getitem__(idx)
-            feats = item["features"]
+            window = self.windows[idx]
+            feats = torch.from_numpy(window["features"]).float()
             flat = feats.reshape(-1, feats.shape[-1])
             return {
                 "features": normalizer.transform(flat).reshape(feats.shape),
-                "timestamps": item["timestamps"],
-                "mask": item["mask"],
-                "metadata": item["metadata"],
+                "timestamps": torch.from_numpy(window["timestamps"]).long(),
+                "mask": torch.from_numpy(window["mask"]).bool(),
+                "metadata": window.get("metadata", {}),
             }
 
     norm_dataset = _NormalizedDataset(dataset.windows)
