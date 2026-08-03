@@ -8,6 +8,7 @@ cross-symbol split. Reports balanced accuracy vs majority baselines.
 """
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import numpy as np
@@ -20,6 +21,7 @@ _IDX_HIGH, _IDX_LOW, _IDX_CLOSE, _IDX_VOLUME = 1, 2, 3, 4
 # returns-style layout (feature_builder.py "returns"): 0 log_return, 1 hl_range, 3 log_volume
 _RET_LOG_RET, _RET_RANGE, _RET_LOG_VOLUME = 0, 1, 3
 _STAT_KEYS = ("volatility", "range", "volume")
+_CACHE_VERSION = 1
 
 
 def _vectorized_window_stats(features: np.ndarray, style: str = "raw") -> dict:
@@ -150,33 +152,122 @@ def _stats_for(windows, style: str) -> list:
     ]
 
 
+def _cache_key(checkpoint: Path, trainer_cfg: dict, max_windows, poolings, device, batch_size: int) -> str:
+    manifest = checkpoint / "manifest.json"
+    fingerprint = Path("storage/training/dataset_fingerprint.json")
+    payload = {
+        "version": _CACHE_VERSION,
+        "checkpoint": str(checkpoint.resolve()),
+        "manifest": manifest.read_bytes().hex() if manifest.exists() else "",
+        "fingerprint": fingerprint.read_bytes().hex() if fingerprint.exists() else "",
+        "trainer": trainer_cfg,
+        "max_windows": max_windows,
+        "poolings": sorted(poolings),
+        "device": device.type,
+        "batch_size": batch_size,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()[:20]
+
+
+def _stats_array(stats: list) -> np.ndarray:
+    return np.asarray([[s[k] for k in _STAT_KEYS] for s in stats], dtype=np.float64)
+
+
+def _stats_list(values: np.ndarray) -> list:
+    return [
+        {key: float(row[i]) for i, key in enumerate(_STAT_KEYS)}
+        for row in values
+    ]
+
+
+def _load_cached(cache_dir: Path, poolings: list[str]):
+    required = [cache_dir / "complete.json", cache_dir / "train_stats.npy", cache_dir / "validation_stats.npy"]
+    required += [cache_dir / f"train_{p}.npy" for p in poolings]
+    required += [cache_dir / f"validation_{p}.npy" for p in poolings]
+    if not all(path.exists() for path in required):
+        return None
+    train_stats = _stats_list(np.load(cache_dir / "train_stats.npy", mmap_mode="r"))
+    validation_stats = _stats_list(np.load(cache_dir / "validation_stats.npy", mmap_mode="r"))
+    train = {
+        p: {"embedding": np.load(cache_dir / f"train_{p}.npy", mmap_mode="r")}
+        for p in poolings
+    }
+    validation = {
+        p: {"embedding": np.load(cache_dir / f"validation_{p}.npy", mmap_mode="r")}
+        for p in poolings
+    }
+    return train, validation, train_stats, validation_stats
+
+
+def _save_cached(cache_dir: Path, train_embeddings: dict, validation_embeddings: dict,
+                 train_stats: list, validation_stats: list) -> None:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    np.save(cache_dir / "train_stats.npy", _stats_array(train_stats))
+    np.save(cache_dir / "validation_stats.npy", _stats_array(validation_stats))
+    for pooling, result in train_embeddings.items():
+        np.save(cache_dir / f"train_{pooling}.npy", result["embedding"])
+    for pooling, result in validation_embeddings.items():
+        np.save(cache_dir / f"validation_{pooling}.npy", result["embedding"])
+    (cache_dir / "complete.json").write_text(json.dumps({"version": _CACHE_VERSION}, indent=2))
+
+
 def main():
     from src.evaluation.embedding._common import (
-        load_model_and_normalizer, build_split_dataset, extract_split_embeddings)
+        load_model_and_normalizer, build_split_dataset, extract_split_embeddings_multi)
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=str, required=True, help="Run dir from CheckpointManager")
     parser.add_argument("--pooling", type=str, default="all",
                         choices=["cls", "mean", "attention", "all"])
     parser.add_argument("--max-windows", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=None,
+                        help="Embedding extraction batch. CPU-only machines are "
+                             "often much faster at 128-256; GPU use 32-64 (VRAM). "
+                             "Default: 128 on CPU, 32 on CUDA.")
+    parser.add_argument("--cache-dir", type=str, default=".cache/linear_probe",
+                        help="Persistent embedding cache directory; use --no-cache to disable.")
+    parser.add_argument("--no-cache", action="store_true",
+                        help="Force dataset/model extraction instead of using the local cache.")
     args = parser.parse_args()
 
     poolings = ["cls", "mean", "attention"] if args.pooling == "all" else [args.pooling]
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    batch_size = args.batch_size or (128 if device.type == "cpu" else 32)
+    print(f"[runtime] device={device}, batch_size={batch_size}", flush=True)
     model, normalizer, configs = load_model_and_normalizer(Path(args.checkpoint), device)
     trainer_cfg = configs["trainer_config"]
     style = trainer_cfg.get("feature_style", "raw")
+    checkpoint = Path(args.checkpoint)
+    cache_dir = Path(args.cache_dir) / _cache_key(
+        checkpoint, trainer_cfg, args.max_windows, poolings, device, batch_size)
 
-    # Build each split dataset ONCE and share across all poolings.
-    print(f"[data] building train split...", flush=True)
-    train_ds = build_split_dataset("train", trainer_cfg, args.max_windows)
-    train_stats = _stats_for(train_ds.windows, style)
-    print(f"[data] train windows={len(train_ds.windows)}", flush=True)
-    print(f"[data] building validation split...", flush=True)
-    test_ds = build_split_dataset("validation", trainer_cfg, args.max_windows)
-    test_stats = _stats_for(test_ds.windows, style)
-    print(f"[data] validation windows={len(test_ds.windows)}", flush=True)
+    cached = None if args.no_cache else _load_cached(cache_dir, poolings)
+    if cached is not None:
+        train_embeddings, test_embeddings, train_stats, test_stats = cached
+        print(f"[cache] loaded {cache_dir}", flush=True)
+    else:
+        # Build each split dataset ONCE and share across all poolings.
+        print(f"[data] building train split...", flush=True)
+        train_ds = build_split_dataset("train", trainer_cfg, args.max_windows)
+        train_stats = _stats_for(train_ds.windows, style)
+        print(f"[data] train windows={len(train_ds.windows)}", flush=True)
+        print(f"[data] building validation split...", flush=True)
+        test_ds = build_split_dataset("validation", trainer_cfg, args.max_windows)
+        test_stats = _stats_for(test_ds.windows, style)
+        print(f"[data] validation windows={len(test_ds.windows)}", flush=True)
+
+        print(f"[encoder] extracting {', '.join(poolings)} from train in one pass", flush=True)
+        train_embeddings = extract_split_embeddings_multi(
+            model, normalizer, "train", poolings, trainer_cfg, device,
+            batch_size=batch_size, dataset=train_ds)
+        print(f"[encoder] extracting {', '.join(poolings)} from validation in one pass", flush=True)
+        test_embeddings = extract_split_embeddings_multi(
+            model, normalizer, "validation", poolings, trainer_cfg, device,
+            batch_size=batch_size, dataset=test_ds)
+        if not args.no_cache:
+            _save_cached(cache_dir, train_embeddings, test_embeddings, train_stats, test_stats)
+            print(f"[cache] saved {cache_dir}", flush=True)
 
     # Thresholds from TRAIN split only (no cross-split leakage).
     thresholds = {
@@ -192,14 +283,11 @@ def main():
 
     for pooling in poolings:
         print(f"=== Pooling: {pooling} ===", flush=True)
-        train_emb = extract_split_embeddings(
-            model, normalizer, "train", pooling, trainer_cfg, device, dataset=train_ds)
-        print(f"[{pooling}] train embeddings extracted "
-              f"({len(train_emb['embedding'])})", flush=True)
-        test_emb = extract_split_embeddings(
-            model, normalizer, "validation", pooling, trainer_cfg, device, dataset=test_ds)
-        print(f"[{pooling}] validation embeddings extracted "
-              f"({len(test_emb['embedding'])})", flush=True)
+        train_emb = train_embeddings[pooling]
+        test_emb = test_embeddings[pooling]
+        print(f"[{pooling}] embeddings extracted "
+              f"(train={len(train_emb['embedding'])}, validation={len(test_emb['embedding'])})",
+              flush=True)
 
         train_emb.update(train_labels)
         test_emb.update(test_labels)
@@ -210,7 +298,7 @@ def main():
         path.write_text(json.dumps(results, indent=2))
         print(f"Linear probe results written to {path}")
         print(json.dumps(results, indent=2))
-        del train_emb, test_emb
+    del train_embeddings, test_embeddings
 
 
 if __name__ == "__main__":

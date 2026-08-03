@@ -45,6 +45,13 @@ class AttentionPooling(nn.Module):
         gen.manual_seed(seed)
         self.query = nn.Parameter(torch.randn(1, 1, d_model, generator=gen) * 0.02)
         self.linear = nn.Linear(d_model, d_model)
+        # Use the same private generator for the projection. The previous
+        # default initialization consumed global RNG state, making attention
+        # pooling differ between separate extraction processes.
+        bound = d_model ** -0.5
+        with torch.no_grad():
+            self.linear.weight.uniform_(-bound, bound, generator=gen)
+            self.linear.bias.zero_()
 
     def forward(self, latent: torch.Tensor, key_padding_mask: torch.Tensor, t_data: int) -> torch.Tensor:
         data_latents = latent[:, 1:, :]  # [B, T_data, D]
@@ -125,3 +132,69 @@ def extract_embeddings(
         "window_start_ms": start_tss,
         "window_end_ms": end_tss,
     }
+
+
+def extract_embeddings_multi(
+    model: nn.Module,
+    dataloader: DataLoader,
+    poolings: List[str],
+    device: torch.device,
+) -> Dict[str, Dict]:
+    """Extract several pooling modes while running the encoder once per batch.
+
+    Pooling only changes the reduction of the encoder latent sequence. Running
+    the transformer once and applying all reductions avoids three full forward
+    passes when comparing cls/mean/attention.
+    """
+    invalid = set(poolings) - {"cls", "mean", "attention"}
+    if invalid:
+        raise ValueError(f"Unknown pooling mode(s): {sorted(invalid)}")
+
+    model.eval()
+    outputs = {
+        pooling: {"embedding": [], "symbols": [], "window_start_ms": [], "window_end_ms": []}
+        for pooling in poolings
+    }
+    attn_pool = AttentionPooling(model.d_model).to(device) if "attention" in poolings else None
+
+    # Keep the same no-grad execution mode as extract_embeddings so callers
+    # get numerically identical results across the two APIs.
+    with torch.no_grad():
+        for batch in dataloader:
+            features = batch["features"].to(device)
+            timestamps = batch["timestamps"].to(device)
+            mask = batch["mask"].to(device)
+            latent, kpm, positions, t_data = model(features, timestamps, mask)
+
+            pooled = {"cls": pool_cls(latent)} if "cls" in poolings else {}
+            if "mean" in poolings:
+                pooled["mean"] = pool_mean(latent, kpm, t_data)
+            if "attention" in poolings:
+                pooled["attention"] = attn_pool(latent, kpm, t_data)
+
+            meta = batch.get("metadata")
+            n = features.shape[0]
+            if isinstance(meta, dict):
+                meta = [
+                    {
+                        k: (v[i].item() if hasattr(v[i], "item") else v[i])
+                        for k, v in meta.items()
+                    }
+                    for i in range(n)
+                ]
+            elif meta is None:
+                meta = [{}] * n
+
+            for pooling in poolings:
+                outputs[pooling]["embedding"].append(pooled[pooling].cpu().numpy())
+                outputs[pooling]["symbols"].extend(m.get("symbol", "unknown") for m in meta)
+                outputs[pooling]["window_start_ms"].extend(
+                    m.get("window_start_ms", 0) for m in meta
+                )
+                outputs[pooling]["window_end_ms"].extend(
+                    m.get("window_end_ms", 0) for m in meta
+                )
+
+    for output in outputs.values():
+        output["embedding"] = np.concatenate(output["embedding"], axis=0)
+    return outputs

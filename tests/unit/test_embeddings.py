@@ -2,7 +2,9 @@ import pytest
 import numpy as np
 import torch
 
-from src.models.teacher.embeddings import pool_cls, pool_mean, AttentionPooling, extract_embeddings
+from src.models.teacher.embeddings import (
+    pool_cls, pool_mean, AttentionPooling, extract_embeddings, extract_embeddings_multi,
+)
 from src.evaluation.embedding.clustering import evaluate_clustering
 from src.evaluation.embedding._common import _resolve_run_dir
 from src.evaluation.embedding.linear_probe import _vectorized_window_stats, window_stats
@@ -174,6 +176,18 @@ class TestExtractEmbeddings:
         loader = create_dataloader(ds, batch_size=2, shuffle=False, seed=42)
         result = extract_embeddings(encoder, loader, "mean", torch.device("cpu"))
         assert not np.allclose(result["embedding"][0], result["embedding"][1])
+
+    def test_multi_pooling_matches_individual_extraction(self, encoder, dataset):
+        loader = create_dataloader(dataset, batch_size=4, shuffle=False, seed=42)
+        multi = extract_embeddings_multi(
+            encoder, loader, ["cls", "mean", "attention"], torch.device("cpu")
+        )
+        for pooling in ["cls", "mean", "attention"]:
+            single_loader = create_dataloader(dataset, batch_size=4, shuffle=False, seed=42)
+            single = extract_embeddings(encoder, single_loader, pooling, torch.device("cpu"))
+            assert np.allclose(multi[pooling]["embedding"], single["embedding"], atol=1e-6)
+            assert multi[pooling]["symbols"] == single["symbols"]
+            assert multi[pooling]["window_start_ms"] == single["window_start_ms"]
 
 
 class TestVectorizedWindowStats:

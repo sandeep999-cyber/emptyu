@@ -14,7 +14,7 @@ import torch
 import yaml
 
 from src.models.teacher.encoder import TeacherEncoder
-from src.models.teacher.embeddings import extract_embeddings
+from src.models.teacher.embeddings import extract_embeddings, extract_embeddings_multi
 from src.training.dataloader import create_dataloader
 from src.training.normalizer import FeatureNormalizer
 from src.training.trainer import _build_windows_for_symbol, _load_manifest, _date_to_ms
@@ -169,3 +169,35 @@ def extract_split_embeddings(
         seed=trainer_cfg.get("seed", 42),
     )
     return extract_embeddings(model, loader, pooling, device)
+
+
+def extract_split_embeddings_multi(
+    model: TeacherEncoder,
+    normalizer: FeatureNormalizer,
+    split: str,
+    poolings: list[str],
+    trainer_cfg: Dict[str, Any],
+    device: torch.device,
+    max_windows: Optional[int] = None,
+    batch_size: int = 32,
+    dataset: Optional[MarketDataset] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Extract multiple pooling modes with one encoder pass per batch."""
+    if dataset is None:
+        dataset = build_split_dataset(split, trainer_cfg, max_windows)
+
+    class _NormalizedDataset(MarketDataset):
+        def __getitem__(self, idx: int) -> Dict[str, Any]:
+            item = super().__getitem__(idx)
+            feats = item["features"]
+            item["features_raw"] = feats.clone()
+            flat = feats.reshape(-1, feats.shape[-1])
+            item["features"] = normalizer.transform(flat).reshape(feats.shape)
+            return item
+
+    norm_dataset = _NormalizedDataset(dataset.windows)
+    loader = create_dataloader(
+        norm_dataset, batch_size=batch_size, shuffle=False,
+        seed=trainer_cfg.get("seed", 42),
+    )
+    return extract_embeddings_multi(model, loader, poolings, device)
