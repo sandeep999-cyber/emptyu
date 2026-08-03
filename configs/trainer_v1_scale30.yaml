@@ -9,6 +9,7 @@ trainer:
   market: futures
   mixed_precision: true
   torch_compile: false
+  async_checkpoint_writes: true
   train_window_stride: 16
   val_window_stride: 16
   max_train_windows: null

@@ -86,3 +86,25 @@ class TestCheckpointManager:
         )
         latest = json.loads((run_dir / "latest.json").read_text())
         assert latest["latest"] == "checkpoint_epoch5.pt"
+
+    def test_async_save_flush_and_load(self, run_dir):
+        mgr = CheckpointManager(run_dir, configs={}, async_writes=True)
+        model = TeacherEncoder(MODEL_CFG)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-4)
+
+        mgr.save(
+            epoch=7, step=70, model=model, optimizer=optim, scheduler=None,
+            normalizer_state={}, mask_generator_state=torch.Generator().get_state(),
+            train_loss=0.7, val_loss=0.4,
+        )
+        mgr.flush()
+        assert (run_dir / "checkpoint_epoch7.pt").exists()
+        manifest = json.loads((run_dir / "manifest.json").read_text())
+        assert len(manifest["checkpoints"]) == 1
+        latest = json.loads((run_dir / "latest.json").read_text())
+        assert latest["latest"] == "checkpoint_epoch7.pt"
+
+        loader = CheckpointManager(run_dir, configs={})
+        (epoch, step, *_rest) = loader.load_latest_checkpoint(model, optim)
+        assert epoch == 7 and step == 70
+        mgr.close()

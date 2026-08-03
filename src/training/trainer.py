@@ -177,7 +177,7 @@ class TeacherTrainer:
             "model_config": model_cfg,
             "optimizer_config": opt_cfg,
             "trainer_config": trainer_cfg,
-        })
+        }, async_writes=trainer_cfg.get("async_checkpoint_writes", False))
         self._restore_from_resume()
         self.log.info(f"TeacherTrainer initialized (num_workers={self.num_workers}).")
 
@@ -487,6 +487,7 @@ class TeacherTrainer:
             self.log.info(f"  val groups: {val_group}")
 
         self.log.info("Training complete.")
+        self.checkpoint_mgr.close()
 
     def _validate(self, dataloader: DataLoader) -> Tuple[float, Dict[str, float]]:
         self.model.eval()
