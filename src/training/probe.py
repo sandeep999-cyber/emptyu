@@ -8,6 +8,7 @@ inform edits to configs/trainer_v1_scale30.yaml before the full 30-epoch run.
 
 import argparse
 import json
+import re
 import time
 from pathlib import Path
 import yaml
@@ -16,6 +17,24 @@ import torch
 from src.training.trainer import TeacherTrainer
 
 FULL_TRAIN_WINDOWS = 65638
+
+
+def _apply_recommendation(path: str, micro: int, compile_on: bool) -> None:
+    """Rewrite micro_batch_size / torch_compile in the trainer yaml in place."""
+    p = Path(path)
+    text = p.read_text()
+
+    def _repl(pattern: str, value: str) -> None:
+        nonlocal text
+        updated, n = re.subn(pattern, value, text, count=1, flags=re.MULTILINE)
+        if n == 0:
+            raise RuntimeError(f"Could not locate {pattern!r} in {p}")
+        text = updated
+
+    _repl(r"^(\s*micro_batch_size:\s*)\d+", lambda m: m.group(1) + str(micro))
+    _repl(r"^(\s*torch_compile:\s*)\w+", lambda m: m.group(1) + ("true" if compile_on else "false"))
+    p.write_text(text)
+    print(f"[Probe] Wrote micro_batch_size={micro}, torch_compile={compile_on} -> {p}")
 
 
 def _run_case(model_cfg, opt_cfg, base, micro, comp, n_train, n_val, run_dir):
@@ -47,6 +66,8 @@ def main():
     ap.add_argument("--trainer-config", default="configs/trainer_v1_scale30.yaml")
     ap.add_argument("--warmup-windows", type=int, default=256)
     ap.add_argument("--timed-windows", type=int, default=2048)
+    ap.add_argument("--apply", action="store_true",
+                    help="Write the recommended micro_batch_size/torch_compile into the trainer yaml")
     args = ap.parse_args()
 
     base = yaml.safe_load(Path(args.trainer_config).read_text())["trainer"]
@@ -89,6 +110,13 @@ def main():
               "(proj ~{:.1f} min/epoch, peak {:.2f} GB)".format(
                   rec["micro_batch_size"], rec["torch_compile"],
                   rec["proj_full_epoch_min"], rec["peak_vram_gb"]))
+        if rec["torch_compile"]:
+            print("HINT: add 'compile_mode: reduce-overhead' to the trainer yaml for CUDA-graph "
+                  "launch overhead (safe here: drop_last=True keeps the train batch static).")
+        print("NOTE: the inductor compile cache is now warm, so the training subprocess "
+              "in this same session reuses it (no recompile).")
+        if args.apply:
+            _apply_recommendation(args.trainer_config, rec["micro_batch_size"], rec["torch_compile"])
     else:
         print("RECOMMEND: all probed cases failed; keep micro_batch_size=32, torch_compile=false")
 
