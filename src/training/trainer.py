@@ -135,6 +135,12 @@ class TeacherTrainer:
         if trainer_cfg.get("torch_compile", False):
             self.log.info("torch.compile enabled for the teacher encoder (experimental).")
             self.model = torch.compile(self.model, mode=trainer_cfg.get("compile_mode"))
+        # When the encoder runs under CUDA graphs (compile_mode: reduce-overhead),
+        # each replay overwrites the pooled output buffers of the previous replay.
+        # autograd re-executes the graph during backward, so accessing a prior
+        # replay's output raises "overwritten by a subsequent run". Marking a new
+        # step before every invocation tells the graph tree the buffers are fresh.
+        self.model_is_compiled = bool(trainer_cfg.get("torch_compile", False))
         self.optimizer = build_optimizer(self.model, opt_cfg)
         total_steps = max(1, len(self.train_dataset) // max(1, trainer_cfg["batch_size"]) * trainer_cfg["epochs"])
         self.scheduler = build_scheduler(self.optimizer, opt_cfg, total_steps)
@@ -399,6 +405,8 @@ class TeacherTrainer:
                     else nullcontext()
                 )
                 with autocast:
+                    if self.model_is_compiled:
+                        torch.compiler.cudagraph_mark_step_begin()
                     latent, kpm, positions, t_data = self.model(
                         corrupted,
                         timestamps.to(self.device, non_blocking=self.pin_memory),
@@ -520,6 +528,8 @@ class TeacherTrainer:
                 masked_positions = self.val_mask_generator(data_mask)
                 corrupted = features_norm.masked_fill(masked_positions.unsqueeze(-1), 0.0)
 
+                if self.model_is_compiled:
+                    torch.compiler.cudagraph_mark_step_begin()
                 latent, kpm, positions, t_data = self.model(
                     corrupted,
                     timestamps.to(self.device, non_blocking=self.pin_memory),

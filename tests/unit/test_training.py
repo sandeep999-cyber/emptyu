@@ -166,6 +166,31 @@ class TestTeacherTrainer:
             mock_trainer.model(features, timestamps, mask)
         assert rope._cache_max_len == before_len
 
+    def test_cudagraph_mark_step_begin_called_per_invocation(self, mock_trainer):
+        """Regression: reduce-overhead CUDA-graph replay overwrites pooled output
+        buffers, so cudagraph_mark_step_begin() must be called before each compiled
+        model invocation (train + val) or backward reads stale memory."""
+        mock_trainer.model_is_compiled = True
+        batch = {
+            "features": torch.randn(4, 512, 15),
+            "feature_mask": torch.ones(4, 512, 15, dtype=torch.bool),
+            "timestamps": torch.arange(512).unsqueeze(0).expand(4, -1),
+            "mask": torch.ones(4, 512, dtype=torch.bool),
+        }
+        fake_loader = MagicMock()
+        fake_loader.__iter__.side_effect = lambda: iter([batch])  # fresh iterator per epoch
+
+        with (
+            patch("src.training.trainer.create_dataloader", return_value=fake_loader),
+            patch("src.training.trainer.torch.compiler.cudagraph_mark_step_begin") as mark,
+            patch.object(mock_trainer, "_validate", return_value=(1.0, {})),
+            patch.object(mock_trainer.checkpoint_mgr, "save"),
+        ):
+            mock_trainer.train()
+
+        # 2 epochs x 1 train batch = 2 compiled invocations (val loop is patched out).
+        assert mark.call_count >= 2, mark.call_count
+
     def test_trainer_advances_sampler_epoch(self, mock_trainer):
         """Regression: sampler epoch was stuck at 0 (same order every epoch)."""
         class SpySampler(EpochMarketSampler):
