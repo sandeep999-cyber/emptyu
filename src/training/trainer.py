@@ -329,9 +329,12 @@ class TeacherTrainer:
             epoch_start = time.time()
             self.model.train()
             epoch_losses = []
-            epoch_group_sums: Dict[str, float] = {}
+            epoch_group_sums: Dict[str, torch.Tensor] = {}
             self.optimizer.zero_grad(set_to_none=True)
-            accum_loss = 0.0
+            # Accumulate loss scalars on the accelerator and sync to CPU only at
+            # log boundaries and epoch end. Per-micro-batch `.item()` calls stall
+            # the CUDA pipeline and prevent the CPU from running ahead.
+            accum_loss = torch.zeros((), device=self.device, dtype=torch.float32)
             accum_n = 0
 
             for i, batch in enumerate(dataloader):
@@ -373,12 +376,12 @@ class TeacherTrainer:
                 loss = losses["total"]
 
                 self.scaler.scale(loss).backward()
-                accum_loss += float(loss.item())
+                accum_loss = accum_loss + loss.detach()
                 accum_n += 1
                 for k, v in losses.items():
                     if k == "total":
                         continue
-                    epoch_group_sums[k] = epoch_group_sums.get(k, 0.0) + v.item() * features.shape[0]
+                    epoch_group_sums[k] = epoch_group_sums.get(k, 0.0) + v.detach() * features.shape[0]
 
                 # Optimizer step at each accumulation boundary (and at epoch end
                 # for partial windows). Scheduler steps once per optimizer step,
@@ -392,15 +395,16 @@ class TeacherTrainer:
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
                 self.scheduler.step()
-                step_loss = accum_loss / max(1, accum_n)
-                accum_loss = 0.0
+                step_loss_t = accum_loss / max(1, accum_n)
+                accum_loss = torch.zeros((), device=self.device, dtype=torch.float32)
                 accum_n = 0
                 self.optimizer.zero_grad(set_to_none=True)
 
-                epoch_losses.append(step_loss)
+                epoch_losses.append(step_loss_t)
                 global_step += 1
 
                 if global_step % self.trainer_cfg.get("log_every", 50) == 0:
+                    step_loss = step_loss_t.item()
                     lr = self.optimizer.param_groups[0]["lr"]
                     rss_mb = psutil.Process().memory_info().rss / 1e6
                     self.log.info(
@@ -409,8 +413,11 @@ class TeacherTrainer:
                     )
 
             epoch_time = time.time() - epoch_start
-            avg_train_loss = sum(epoch_losses) / len(epoch_losses) if epoch_losses else 0.0
-            train_group = {k: v / max(1, len(epoch_losses)) for k, v in epoch_group_sums.items()}
+            if epoch_losses:
+                avg_train_loss = (sum(epoch_losses) / len(epoch_losses)).item()
+            else:
+                avg_train_loss = 0.0
+            train_group = {k: (v / max(1, len(epoch_losses))).item() for k, v in epoch_group_sums.items()}
             should_validate = epoch % val_every == 0 or epoch == self.trainer_cfg["epochs"]
             if should_validate:
                 val_loss, val_group = self._validate(val_loader)
@@ -454,9 +461,9 @@ class TeacherTrainer:
 
     def _validate(self, dataloader: DataLoader) -> Tuple[float, Dict[str, float]]:
         self.model.eval()
-        total_loss = 0.0
+        total_loss = torch.zeros((), device=self.device, dtype=torch.float32)
         count = 0
-        group_sums: Dict[str, float] = {}
+        group_sums: Dict[str, torch.Tensor] = {}
         with torch.no_grad():
             for batch in dataloader:
                 features = batch["features"]
@@ -484,14 +491,14 @@ class TeacherTrainer:
                     feature_mask.to(self.device, non_blocking=self.pin_memory),
                     masked_positions,
                 )
-                total_loss += losses["total"].item() * features.shape[0]
+                total_loss = total_loss + losses["total"].detach() * features.shape[0]
                 for k, v in losses.items():
                     if k == "total":
                         continue
-                    group_sums[k] = group_sums.get(k, 0.0) + v.item() * features.shape[0]
+                    group_sums[k] = group_sums.get(k, 0.0) + v.detach() * features.shape[0]
                 count += features.shape[0]
 
         self.model.train()
         if count == 0:
             return 0.0, {}
-        return total_loss / count, {k: v / count for k, v in group_sums.items()}
+        return (total_loss / count).item(), {k: (v / count).item() for k, v in group_sums.items()}
