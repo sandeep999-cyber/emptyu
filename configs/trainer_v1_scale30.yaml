@@ -10,6 +10,7 @@ trainer:
   mixed_precision: true
   torch_compile: false
   async_checkpoint_writes: true
+  val_batch_size: 64
   train_window_stride: 16
   val_window_stride: 16
   max_train_windows: null

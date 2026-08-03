@@ -339,8 +339,14 @@ class TeacherTrainer:
             persistent_workers=self.persistent_workers,
             prefetch_factor=prefetch_factor,
         )
+        # Validation is forward-only, so it can use a larger batch than the
+        # training micro-batch (no grad graph / optimizer state). Halves+ the
+        # number of validation iterations for a faster per-epoch cadence.
+        val_batch_size = max(
+            1, min(128, int(self.trainer_cfg.get("val_batch_size", self.micro_batch_size * 2)))
+        )
         val_loader = create_dataloader(
-            self.val_dataset, batch_size=batch_size, shuffle=False,
+            self.val_dataset, batch_size=val_batch_size, shuffle=False,
             num_workers=self.num_workers,
             seed=self.trainer_cfg.get("seed", 42),
             pin_memory=self.pin_memory,

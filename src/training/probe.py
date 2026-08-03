@@ -20,7 +20,7 @@ FULL_TRAIN_WINDOWS = 65638
 
 
 def _apply_recommendation(path: str, micro: int, compile_on: bool) -> None:
-    """Rewrite micro_batch_size / torch_compile in the trainer yaml in place."""
+    """Rewrite micro_batch_size / torch_compile / compile_mode in the trainer yaml in place."""
     p = Path(path)
     text = p.read_text()
 
@@ -31,10 +31,25 @@ def _apply_recommendation(path: str, micro: int, compile_on: bool) -> None:
             raise RuntimeError(f"Could not locate {pattern!r} in {p}")
         text = updated
 
-    _repl(r"^(\s*micro_batch_size:\s*)\d+", lambda m: m.group(1) + str(micro))
-    _repl(r"^(\s*torch_compile:\s*)\w+", lambda m: m.group(1) + ("true" if compile_on else "false"))
+    def _set(key: str, value: str) -> None:
+        nonlocal text
+        if re.search(rf"^\s*{key}:", text, flags=re.MULTILINE):
+            _repl(rf"^(\s*{key}:\s*)\S+", lambda m: m.group(1) + value)
+        else:
+            anchor = re.search(r"^\s*torch_compile:.*$", text, flags=re.MULTILINE)
+            if anchor is None:
+                raise RuntimeError(f"No torch_compile anchor to insert {key} after in {p}")
+            indent = anchor.group(0)[: len(anchor.group(0)) - len(anchor.group(0).lstrip())]
+            text = text[: anchor.end()] + f"\n{indent}{key}: {value}" + text[anchor.end():]
+
+    _set("micro_batch_size", str(micro))
+    _set("torch_compile", "true" if compile_on else "false")
+    # CUDA graphs (reduce-overhead) cut kernel-launch overhead for the static
+    # train batch; keep compile_mode consistent with torch_compile.
+    _set("compile_mode", "reduce-overhead" if compile_on else "null")
     p.write_text(text)
-    print(f"[Probe] Wrote micro_batch_size={micro}, torch_compile={compile_on} -> {p}")
+    print(f"[Probe] Wrote micro_batch_size={micro}, torch_compile={compile_on}, "
+          f"compile_mode={'reduce-overhead' if compile_on else 'null'} -> {p}")
 
 
 def _run_case(model_cfg, opt_cfg, base, micro, comp, n_train, n_val, run_dir):
