@@ -19,6 +19,32 @@ from sklearn.metrics import balanced_accuracy_score
 _IDX_HIGH, _IDX_LOW, _IDX_CLOSE, _IDX_VOLUME = 1, 2, 3, 4
 # returns-style layout (feature_builder.py "returns"): 0 log_return, 1 hl_range, 3 log_volume
 _RET_LOG_RET, _RET_RANGE, _RET_LOG_VOLUME = 0, 1, 3
+_STAT_KEYS = ("volatility", "range", "volume")
+
+
+def _vectorized_window_stats(features: np.ndarray, style: str = "raw") -> dict:
+    """Batched per-window stats for stacked windows ``features: [N, T, F]``.
+
+    Vectorized equivalent of :func:`window_stats` (numerically identical), the
+    dominant cost of the probe. Values are plain ndarrays (not floats).
+    """
+    if style == "returns":
+        lr = features[:, :, _RET_LOG_RET]
+        lr = np.nan_to_num(np.where(np.isfinite(lr), lr, np.nan), nan=0.0)
+        volatility = np.std(lr, axis=1)
+        range_ = np.mean(features[:, :, _RET_RANGE], axis=1)
+        log_volume = features[:, :, _RET_LOG_VOLUME]
+        volume = np.mean(np.expm1(np.clip(log_volume, 0.0, None)), axis=1)
+    else:
+        close = features[:, :, _IDX_CLOSE]
+        high = features[:, :, _IDX_HIGH]
+        low = features[:, :, _IDX_LOW]
+        volume = features[:, :, _IDX_VOLUME]
+        log_ret = np.diff(np.log(np.maximum(close, 1e-10)), axis=1)
+        volatility = np.std(log_ret, axis=1)
+        range_ = np.mean((high - low) / np.maximum(close, 1e-10), axis=1)
+        volume = np.mean(volume, axis=1)
+    return {"volatility": volatility, "range": range_, "volume": volume}
 
 
 def window_stats(features: np.ndarray, style: str = "raw") -> dict:
@@ -99,11 +125,33 @@ def evaluate_probe(train_emb: dict, test_emb: dict, test_train_emb: dict) -> dic
 
 
 def _extract_with_labels(model, normalizer, split, pooling, trainer_cfg, device, max_windows):
+    import time
     from src.evaluation.embedding._common import build_split_dataset, extract_split_embeddings
 
     dataset = build_split_dataset(split, trainer_cfg, max_windows)
     style = trainer_cfg.get("feature_style", "raw")
-    stats = [window_stats(w["features"], style=style) for w in dataset.windows]
+    windows = dataset.windows
+    n = len(windows)
+
+    keys = _STAT_KEYS
+    cols = {k: np.empty(n, dtype=np.float64) for k in keys}
+    chunk = 8192
+    t0 = time.time()
+    for start in range(0, n, chunk):
+        end = min(start + chunk, n)
+        feats = np.stack([w["features"] for w in windows[start:end]])
+        s = _vectorized_window_stats(feats, style)
+        for k in keys:
+            cols[k][start:end] = s[k]
+        if start % (chunk * 4) == 0:
+            print(f"[{split}] stats {end}/{n} ({end / max(n, 1):.0%}) "
+                  f"{time.time() - t0:.1f}s", flush=True)
+    stats = [
+        {"volatility": float(cols["volatility"][i]),
+         "range": float(cols["range"][i]),
+         "volume": float(cols["volume"][i])}
+        for i in range(n)
+    ]
     emb = extract_split_embeddings(
         model, normalizer, split, pooling, trainer_cfg, device,
         max_windows=max_windows, dataset=dataset,
@@ -127,8 +175,12 @@ def main():
 
     train_emb, train_stats = _extract_with_labels(
         model, normalizer, "train", args.pooling, trainer_cfg, device, args.max_windows)
+    print(f"[{args.pooling}] train extracted "
+          f"({len(train_emb['embedding'])} windows)", flush=True)
     test_emb, test_stats = _extract_with_labels(
         model, normalizer, "validation", args.pooling, trainer_cfg, device, args.max_windows)
+    print(f"[{args.pooling}] validation extracted "
+          f"({len(test_emb['embedding'])} windows)", flush=True)
 
     # In-sample baseline: same train windows used for fitting the probe
     test_train_emb, test_train_stats = train_emb, train_stats
