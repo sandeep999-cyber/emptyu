@@ -284,13 +284,16 @@ class TeacherTrainer:
 
     def _normalize_batch(self, features: torch.Tensor, feature_mask: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         B, T, D = features.shape
-        flat = features.reshape(-1, D)
-        flat_norm = self.normalizer.transform(flat)
-        features_norm = flat_norm.reshape(B, T, D)
-        return (
-            features_norm.to(self.device, non_blocking=self.pin_memory),
-            features.to(self.device, non_blocking=self.pin_memory),
-        )
+        features_raw = features.to(self.device, non_blocking=self.pin_memory)
+        # Keep normalization on the accelerator: transferring raw features
+        # once is cheaper than normalizing on CPU and transferring a second
+        # full tensor for every micro-batch.
+        for attr in ("mean", "std", "median", "iqr"):
+            value = getattr(self.normalizer, attr, None)
+            if value is not None and value.device != self.device:
+                setattr(self.normalizer, attr, value.to(self.device))
+        flat_norm = self.normalizer.transform(features_raw.reshape(-1, D))
+        return flat_norm.reshape(B, T, D), features_raw
 
     def train(self):
         self.log.info("Starting training.")
@@ -318,7 +321,6 @@ class TeacherTrainer:
         global_step = self.start_step
         best_val_loss = self.best_val_loss
         last_val_loss = None
-        tokens_per_epoch = len(self.train_dataset) * self.model_cfg["model"]["context_length"]
         val_every = max(1, int(self.trainer_cfg.get("val_every", 1)))
         checkpoint_every = max(1, int(self.trainer_cfg.get("checkpoint_every", 1)))
 
@@ -343,8 +345,7 @@ class TeacherTrainer:
                 data_mask = mask.to(self.device, non_blocking=self.pin_memory)
                 masked_positions = self.mask_generator(data_mask)
 
-                corrupted = features_norm.clone()
-                corrupted = corrupted.masked_fill(masked_positions.unsqueeze(-1), 0.0)
+                corrupted = features_norm.masked_fill(masked_positions.unsqueeze(-1), 0.0)
 
                 autocast = (
                     torch.autocast(device_type=self.device.type, dtype=self.amp_dtype)
@@ -466,8 +467,7 @@ class TeacherTrainer:
                 features_norm, features_raw = self._normalize_batch(features, feature_mask)
                 data_mask = mask.to(self.device, non_blocking=self.pin_memory)
                 masked_positions = self.val_mask_generator(data_mask)
-                corrupted = features_norm.clone()
-                corrupted = corrupted.masked_fill(masked_positions.unsqueeze(-1), 0.0)
+                corrupted = features_norm.masked_fill(masked_positions.unsqueeze(-1), 0.0)
 
                 latent, kpm, positions, t_data = self.model(
                     corrupted,
