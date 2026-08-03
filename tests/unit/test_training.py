@@ -144,6 +144,28 @@ class TestTeacherTrainer:
         assert "price" in rec
         assert "funding_oi" in rec
 
+    def test_rope_cache_prebuilt_before_compile(self, mock_trainer):
+        """Regression: the RoPE cache must be built BEFORE torch.compile so CUDA-graph
+        replay (compile_mode: reduce-overhead) never overwrites the cos/sin buffers."""
+        rope = mock_trainer.model.rope
+        assert rope._cache_ready is True
+        mp = mock_trainer.model.max_position
+        assert mp is not None and mp > 0
+        assert rope._cache_cos is not None
+        assert rope._cache_cos.shape[0] == mp + 1
+
+    def test_rope_cache_noop_forward_does_not_resize(self, mock_trainer):
+        """Forward must not resize the pre-built cache (guard short-circuits)."""
+        rope = mock_trainer.model.rope
+        before_len = rope._cache_max_len
+        mock_trainer.model.eval()
+        features = torch.randn(1, 512, 15)
+        timestamps = torch.arange(512).unsqueeze(0)
+        mask = torch.ones(1, 512, dtype=torch.bool)
+        with torch.no_grad():
+            mock_trainer.model(features, timestamps, mask)
+        assert rope._cache_max_len == before_len
+
     def test_trainer_advances_sampler_epoch(self, mock_trainer):
         """Regression: sampler epoch was stuck at 0 (same order every epoch)."""
         class SpySampler(EpochMarketSampler):

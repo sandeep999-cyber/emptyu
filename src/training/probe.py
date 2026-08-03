@@ -64,6 +64,9 @@ def _run_case(model_cfg, opt_cfg, base, micro, comp, n_train, n_val, run_dir):
     tc.update(
         micro_batch_size=micro,
         torch_compile=comp,
+        # Probe the exact compile_mode that --apply writes, so the recommended
+        # setting is the one that was actually measured (and verified not to crash).
+        compile_mode="reduce-overhead" if comp else None,
         epochs=1,
         max_train_windows=n_train,
         max_val_windows=n_val,

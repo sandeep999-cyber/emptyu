@@ -124,6 +124,14 @@ class TeacherTrainer:
         full_model_cfg = {**model_cfg["model"], "loss": model_cfg.get("loss", {})}
         full_model_cfg["max_position"] = self._compute_max_position()
         self.model = TeacherEncoder(full_model_cfg).to(self.device)
+        # Pre-build the RoPE cache BEFORE torch.compile so the cos/sin buffers are
+        # plain graph *inputs*. Building them inside the captured forward writes
+        # buffer outputs that CUDA-graph replay (compile_mode: reduce-overhead)
+        # overwrites, then backward reads stale memory -> RuntimeError.
+        max_position = full_model_cfg.get("max_position")
+        if max_position is not None:
+            self.model.rope.build_cache(max_position + 1, self.device)
+            self.model.rope._cache_ready = True
         if trainer_cfg.get("torch_compile", False):
             self.log.info("torch.compile enabled for the teacher encoder (experimental).")
             self.model = torch.compile(self.model, mode=trainer_cfg.get("compile_mode"))
