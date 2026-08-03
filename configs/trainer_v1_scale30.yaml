@@ -12,7 +12,7 @@ trainer:
   max_train_windows: null
   max_val_windows: null
   log_every: 50
-  val_every: 1
-  checkpoint_every: 1
+  val_every: 2
+  checkpoint_every: 2
   normalizer:
     mode: zscore

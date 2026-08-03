@@ -314,7 +314,10 @@ class TeacherTrainer:
 
         global_step = self.start_step
         best_val_loss = self.best_val_loss
+        last_val_loss = None
         tokens_per_epoch = len(self.train_dataset) * self.model_cfg["model"]["context_length"]
+        val_every = max(1, int(self.trainer_cfg.get("val_every", 1)))
+        checkpoint_every = max(1, int(self.trainer_cfg.get("checkpoint_every", 1)))
 
         for epoch in range(self.start_epoch + 1, self.trainer_cfg["epochs"] + 1):
             sampler.set_epoch(epoch)
@@ -400,28 +403,40 @@ class TeacherTrainer:
             epoch_time = time.time() - epoch_start
             avg_train_loss = sum(epoch_losses) / len(epoch_losses) if epoch_losses else 0.0
             train_group = {k: v / max(1, len(epoch_losses)) for k, v in epoch_group_sums.items()}
-            val_loss, val_group = self._validate(val_loader)
-            is_best = val_loss < best_val_loss
-            if is_best:
-                best_val_loss = val_loss
+            should_validate = epoch % val_every == 0 or epoch == self.trainer_cfg["epochs"]
+            if should_validate:
+                val_loss, val_group = self._validate(val_loader)
+                last_val_loss = val_loss
+                is_best = val_loss < best_val_loss
+                if is_best:
+                    best_val_loss = val_loss
+            else:
+                val_loss = last_val_loss
+                val_group = {}
+                is_best = False
 
-            self.checkpoint_mgr.save(
-                epoch=epoch,
-                step=global_step,
-                model=self.model,
-                optimizer=self.optimizer,
-                scheduler=self.scheduler,
-                normalizer_state=self.normalizer.state_dict(),
-                mask_generator_state=self.mask_generator.get_state(),
-                val_mask_generator_state=self.val_mask_generator.get_state(),
-                train_loss=avg_train_loss,
-                val_loss=val_loss,
-                is_best=is_best,
-                metrics={"train": {"total": avg_train_loss, **train_group}, "val": {"total": val_loss, **val_group}},
-            )
+            should_checkpoint = (
+                should_validate and (epoch % checkpoint_every == 0)
+            ) or epoch == self.trainer_cfg["epochs"] or is_best
+            if should_checkpoint:
+                self.checkpoint_mgr.save(
+                    epoch=epoch,
+                    step=global_step,
+                    model=self.model,
+                    optimizer=self.optimizer,
+                    scheduler=self.scheduler,
+                    normalizer_state=self.normalizer.state_dict(),
+                    mask_generator_state=self.mask_generator.get_state(),
+                    val_mask_generator_state=self.val_mask_generator.get_state(),
+                    train_loss=avg_train_loss,
+                    val_loss=val_loss,
+                    is_best=is_best,
+                    metrics={"train": {"total": avg_train_loss, **train_group}, "val": {"total": val_loss, **val_group}},
+                )
+            val_display = f"{val_loss:.4f}" if val_loss is not None else "skipped"
             self.log.info(
                 f"Epoch {epoch}/{self.trainer_cfg['epochs']} "
-                f"train_loss={avg_train_loss:.4f} val_loss={val_loss:.4f} "
+                f"train_loss={avg_train_loss:.4f} val_loss={val_display} "
                 f"time={epoch_time:.1f}s best={is_best}"
             )
             self.log.info(f"  train groups: {train_group}")
