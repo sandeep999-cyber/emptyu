@@ -2,11 +2,13 @@ trainer:
   batch_size: 64
   micro_batch_size: 32
   epochs: 30
-  num_workers: 2
+  num_workers: 4
+  prefetch_factor: 4
   device: auto
   seed: 42
   market: futures
   mixed_precision: true
+  torch_compile: false
   train_window_stride: 16
   val_window_stride: 16
   max_train_windows: null

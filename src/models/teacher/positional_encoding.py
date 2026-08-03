@@ -19,8 +19,12 @@ class RotaryPositionalEncoding(nn.Module):
         self.register_buffer("_cache_cos", None, persistent=False)
         self.register_buffer("_cache_sin", None, persistent=False)
         self._cache_max_len = 0
+        # Set by the encoder forward pass once it has pre-sized the cache for
+        # the current batch. When False, apply_rope self-checks every call so
+        # direct callers (e.g. tests) can grow the cache safely.
+        self._cache_ready = False
 
-    def _build_cache(self, max_seq_len: int, device: torch.device):
+    def build_cache(self, max_seq_len: int, device: torch.device):
         if max_seq_len <= self._cache_max_len:
             return
         d_half = self.d_model // 2
@@ -39,8 +43,11 @@ class RotaryPositionalEncoding(nn.Module):
         return torch.cat([-x2, x1], dim=-1)
 
     def apply_rope(self, q: torch.Tensor, k: torch.Tensor, positions: torch.Tensor):
-        max_pos = int(positions.max().item()) + 1
-        self._build_cache(max_pos, q.device)
+        # Cache sizing is hoisted to the encoder forward pass (one host sync per
+        # forward instead of one per transformer block). Direct callers that never
+        # pre-built the cache fall back to the self-checking path.
+        if not self._cache_ready:
+            self.build_cache(int(positions.max().item()) + 1, q.device)
 
         cos = self._cache_cos[positions.long()]  # [..., T, d_half]
         sin = self._cache_sin[positions.long()]  # [..., T, d_half]

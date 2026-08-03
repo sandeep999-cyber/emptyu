@@ -22,9 +22,19 @@ def create_dataloader(
     persistent_workers: bool = False,
     seed: int = 42,
     sampler: Optional[EpochMarketSampler] = None,
+    prefetch_factor: Optional[int] = None,
 ) -> DataLoader:
     """Create a PyTorch DataLoader over MarketDataset with seeded epoch shuffling."""
     worker_init = _seed_worker if num_workers > 0 else None
+    loader_kwargs: dict = {
+        "num_workers": num_workers,
+        "pin_memory": pin_memory,
+        "worker_init_fn": worker_init,
+    }
+    if num_workers > 0:
+        loader_kwargs["persistent_workers"] = persistent_workers
+        if prefetch_factor is not None:
+            loader_kwargs["prefetch_factor"] = prefetch_factor
     if shuffle:
         if sampler is None:
             sampler = EpochMarketSampler(len(dataset), shuffle=True, seed=seed)
@@ -32,18 +42,12 @@ def create_dataloader(
             dataset=dataset,
             batch_size=batch_size,
             sampler=sampler,
-            num_workers=num_workers,
-            pin_memory=pin_memory,
-            persistent_workers=persistent_workers,
-            worker_init_fn=worker_init,
             drop_last=True,
+            **loader_kwargs,
         )
     return DataLoader(
         dataset=dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-        persistent_workers=persistent_workers,
-        worker_init_fn=worker_init,
+        **loader_kwargs,
     )

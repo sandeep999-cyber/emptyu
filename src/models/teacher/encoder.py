@@ -74,6 +74,10 @@ class TeacherEncoder(nn.Module):
         data_positions = 1 + minute_offsets
         cls_position = torch.zeros(B, 1, dtype=torch.long, device=device)
         positions = torch.cat([cls_position, data_positions], dim=1)  # [B, T_total]
+        # Size the shared RoPE cache once per forward; blocks index it without
+        # re-syncing. Rebuilds are no-ops after the largest position is seen.
+        self.rope.build_cache(int(positions.max().item()) + 1, device)
+        self.rope._cache_ready = True
 
         # key_padding_mask: CLS always valid, data uses sample mask
         cls_mask = torch.ones(B, 1, dtype=torch.bool, device=device)

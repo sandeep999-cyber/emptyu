@@ -123,6 +123,9 @@ class TeacherTrainer:
 
         full_model_cfg = {**model_cfg["model"], "loss": model_cfg.get("loss", {})}
         self.model = TeacherEncoder(full_model_cfg).to(self.device)
+        if trainer_cfg.get("torch_compile", False):
+            self.log.info("torch.compile enabled for the teacher encoder (experimental).")
+            self.model = torch.compile(self.model)
         self.optimizer = build_optimizer(self.model, opt_cfg)
         total_steps = max(1, len(self.train_dataset) // max(1, trainer_cfg["batch_size"]) * trainer_cfg["epochs"])
         self.scheduler = build_scheduler(self.optimizer, opt_cfg, total_steps)
@@ -302,6 +305,7 @@ class TeacherTrainer:
         sampler = EpochMarketSampler(
             len(self.train_dataset), shuffle=True, seed=self.trainer_cfg.get("seed", 42)
         )
+        prefetch_factor = self.trainer_cfg.get("prefetch_factor")
         dataloader = create_dataloader(
             self.train_dataset, batch_size=batch_size, shuffle=True,
             num_workers=self.num_workers,
@@ -309,6 +313,7 @@ class TeacherTrainer:
             sampler=sampler,
             pin_memory=self.pin_memory,
             persistent_workers=self.persistent_workers,
+            prefetch_factor=prefetch_factor,
         )
         val_loader = create_dataloader(
             self.val_dataset, batch_size=batch_size, shuffle=False,
