@@ -19,16 +19,21 @@ from src.training.trainer import TeacherTrainer
 FULL_TRAIN_WINDOWS = 65638
 
 
-def _apply_recommendation(path: str, micro: int, compile_on: bool) -> None:
-    """Rewrite micro_batch_size / torch_compile / compile_mode in the trainer yaml in place."""
-    p = Path(path)
-    text = p.read_text()
+def _apply_recommendation(src_path: str, micro: int, compile_on: bool, out_path: str) -> None:
+    """Write a tuned copy of the trainer yaml (micro_batch/torch_compile/compile_mode).
+
+    The tracked config file is never modified: a tuned copy is written to
+    ``out_path`` (Drive-backed on Colab via the models/ symlink), so future
+    ``git pull --ff-only`` calls in the notebook never conflict and the tuned
+    settings persist across Colab sessions.
+    """
+    text = Path(src_path).read_text()
 
     def _repl(pattern: str, value: str) -> None:
         nonlocal text
         updated, n = re.subn(pattern, value, text, count=1, flags=re.MULTILINE)
         if n == 0:
-            raise RuntimeError(f"Could not locate {pattern!r} in {p}")
+            raise RuntimeError(f"Could not locate {pattern!r} in {src_path}")
         text = updated
 
     def _set(key: str, value: str) -> None:
@@ -38,7 +43,7 @@ def _apply_recommendation(path: str, micro: int, compile_on: bool) -> None:
         else:
             anchor = re.search(r"^\s*torch_compile:.*$", text, flags=re.MULTILINE)
             if anchor is None:
-                raise RuntimeError(f"No torch_compile anchor to insert {key} after in {p}")
+                raise RuntimeError(f"No torch_compile anchor to insert {key} after in {src_path}")
             indent = anchor.group(0)[: len(anchor.group(0)) - len(anchor.group(0).lstrip())]
             text = text[: anchor.end()] + f"\n{indent}{key}: {value}" + text[anchor.end():]
 
@@ -47,9 +52,11 @@ def _apply_recommendation(path: str, micro: int, compile_on: bool) -> None:
     # CUDA graphs (reduce-overhead) cut kernel-launch overhead for the static
     # train batch; keep compile_mode consistent with torch_compile.
     _set("compile_mode", "reduce-overhead" if compile_on else "null")
-    p.write_text(text)
-    print(f"[Probe] Wrote micro_batch_size={micro}, torch_compile={compile_on}, "
-          f"compile_mode={'reduce-overhead' if compile_on else 'null'} -> {p}")
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text)
+    print(f"[Probe] Wrote tuned config micro_batch={micro} torch_compile={compile_on} "
+          f"compile_mode={'reduce-overhead' if compile_on else 'null'} -> {out}")
 
 
 def _run_case(model_cfg, opt_cfg, base, micro, comp, n_train, n_val, run_dir):
@@ -82,7 +89,9 @@ def main():
     ap.add_argument("--warmup-windows", type=int, default=256)
     ap.add_argument("--timed-windows", type=int, default=2048)
     ap.add_argument("--apply", action="store_true",
-                    help="Write the recommended micro_batch_size/torch_compile into the trainer yaml")
+                    help="Write the recommended micro_batch_size/torch_compile to --apply-to")
+    ap.add_argument("--apply-to", default="models/foundation/teacher_v1/probe_config.yaml",
+                    help="Where to write the tuned config (Drive-backed on Colab via models/ symlink)")
     args = ap.parse_args()
 
     base = yaml.safe_load(Path(args.trainer_config).read_text())["trainer"]
@@ -126,12 +135,14 @@ def main():
                   rec["micro_batch_size"], rec["torch_compile"],
                   rec["proj_full_epoch_min"], rec["peak_vram_gb"]))
         if rec["torch_compile"]:
-            print("HINT: add 'compile_mode: reduce-overhead' to the trainer yaml for CUDA-graph "
-                  "launch overhead (safe here: drop_last=True keeps the train batch static).")
+            print("HINT: compile_mode: reduce-overhead is auto-set on apply for CUDA-graph "
+                  "launch overhead (safe: drop_last=True keeps the train batch static).")
         print("NOTE: the inductor compile cache is now warm, so the training subprocess "
               "in this same session reuses it (no recompile).")
         if args.apply:
-            _apply_recommendation(args.trainer_config, rec["micro_batch_size"], rec["torch_compile"])
+            _apply_recommendation(args.trainer_config, rec["micro_batch_size"],
+                                  rec["torch_compile"], args.apply_to)
+            print("TUNED_CONFIG=" + str(Path(args.apply_to).resolve()))
     else:
         print("RECOMMEND: all probed cases failed; keep micro_batch_size=32, torch_compile=false")
 
