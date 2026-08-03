@@ -157,9 +157,7 @@ def extract_embeddings_multi(
     }
     attn_pool = AttentionPooling(model.d_model).to(device) if "attention" in poolings else None
 
-    # Keep the same no-grad execution mode as extract_embeddings so callers
-    # get numerically identical results across the two APIs.
-    with torch.no_grad():
+    with torch.inference_mode():
         for batch in dataloader:
             features = batch["features"].to(device)
             timestamps = batch["timestamps"].to(device)

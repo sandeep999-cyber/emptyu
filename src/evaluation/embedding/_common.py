@@ -158,10 +158,13 @@ def extract_split_embeddings(
         def __getitem__(self, idx: int) -> Dict[str, Any]:
             item = super().__getitem__(idx)
             feats = item["features"]
-            item["features_raw"] = feats.clone()
             flat = feats.reshape(-1, feats.shape[-1])
-            item["features"] = normalizer.transform(flat).reshape(feats.shape)
-            return item
+            return {
+                "features": normalizer.transform(flat).reshape(feats.shape),
+                "timestamps": item["timestamps"],
+                "mask": item["mask"],
+                "metadata": item["metadata"],
+            }
 
     norm_dataset = _NormalizedDataset(dataset.windows)
     loader = create_dataloader(
@@ -190,10 +193,13 @@ def extract_split_embeddings_multi(
         def __getitem__(self, idx: int) -> Dict[str, Any]:
             item = super().__getitem__(idx)
             feats = item["features"]
-            item["features_raw"] = feats.clone()
             flat = feats.reshape(-1, feats.shape[-1])
-            item["features"] = normalizer.transform(flat).reshape(feats.shape)
-            return item
+            return {
+                "features": normalizer.transform(flat).reshape(feats.shape),
+                "timestamps": item["timestamps"],
+                "mask": item["mask"],
+                "metadata": item["metadata"],
+            }
 
     norm_dataset = _NormalizedDataset(dataset.windows)
     loader = create_dataloader(
