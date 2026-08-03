@@ -30,8 +30,10 @@ def _vectorized_window_stats(features: np.ndarray, style: str = "raw") -> dict:
     """
     if style == "returns":
         lr = features[:, :, _RET_LOG_RET]
-        lr = np.nan_to_num(np.where(np.isfinite(lr), lr, np.nan), nan=0.0)
-        volatility = np.std(lr, axis=1)
+        # Match per-window window_stats: non-finite are filtered OUT, so std is
+        # taken over the finite subset (nanstd ignores NaN = same as dropping).
+        vol = np.nanstd(np.where(np.isfinite(lr), lr, np.nan), axis=1)
+        volatility = np.nan_to_num(vol, nan=0.0)  # all-non-finite window -> 0.0 (as before)
         range_ = np.mean(features[:, :, _RET_RANGE], axis=1)
         log_volume = features[:, :, _RET_LOG_VOLUME]
         volume = np.mean(np.expm1(np.clip(log_volume, 0.0, None)), axis=1)

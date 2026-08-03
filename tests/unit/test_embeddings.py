@@ -5,6 +5,7 @@ import torch
 from src.models.teacher.embeddings import pool_cls, pool_mean, AttentionPooling, extract_embeddings
 from src.evaluation.embedding.clustering import evaluate_clustering
 from src.evaluation.embedding._common import _resolve_run_dir
+from src.evaluation.embedding.linear_probe import _vectorized_window_stats, window_stats
 from src.models.teacher.encoder import TeacherEncoder
 from src.data.market_dataset import MarketDataset
 from src.training.dataloader import create_dataloader
@@ -173,6 +174,40 @@ class TestExtractEmbeddings:
         loader = create_dataloader(ds, batch_size=2, shuffle=False, seed=42)
         result = extract_embeddings(encoder, loader, "mean", torch.device("cpu"))
         assert not np.allclose(result["embedding"][0], result["embedding"][1])
+
+
+class TestVectorizedWindowStats:
+    """Vectorized batch stats must match the reference per-window stats,
+    including windows with NaN/Inf in the log-return column (real data has
+    these), and for both raw and returns feature styles."""
+    _KEYS = ["volatility", "range", "volume"]
+
+    def test_equivalence_with_non_finite(self):
+        rng = np.random.default_rng(0)
+        for style in ["raw", "returns"]:
+            for _ in range(40):
+                n = int(rng.integers(1, 8))
+                t = int(rng.integers(2, 600))
+                feats = rng.standard_normal((n, t, 15)).astype(np.float32)
+                if style == "returns":
+                    hit = rng.random((n, t)) < 0.02
+                    feats[hit, 0] = np.nan
+                    hit = rng.random((n, t)) < 0.01
+                    feats[hit, 0] = np.inf
+                vec = _vectorized_window_stats(feats, style)
+                ref = {
+                    k: [window_stats(feats[i], style)[k] for i in range(n)]
+                    for k in self._KEYS
+                }
+                for k in self._KEYS:
+                    assert np.allclose(vec[k], ref[k], atol=1e-6, equal_nan=True), (style, k)
+
+    def test_all_nonfinite_returns_volatility_is_zero(self):
+        feats = np.full((2, 512, 15), np.nan, dtype=np.float32)
+        vec = _vectorized_window_stats(feats, "returns")["volatility"]
+        ref = [window_stats(feats[i], "returns")["volatility"] for i in range(2)]
+        assert np.allclose(vec, ref, atol=1e-6)
+        assert vec[0] == 0.0
 
 
 class TestClustering:
