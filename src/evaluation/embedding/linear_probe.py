@@ -105,7 +105,8 @@ def _extract_with_labels(model, normalizer, split, pooling, trainer_cfg, device,
     style = trainer_cfg.get("feature_style", "raw")
     stats = [window_stats(w["features"], style=style) for w in dataset.windows]
     emb = extract_split_embeddings(
-        model, normalizer, split, pooling, trainer_cfg, device, max_windows=max_windows,
+        model, normalizer, split, pooling, trainer_cfg, device,
+        max_windows=max_windows, dataset=dataset,
     )
     assert len(emb["embedding"]) == len(stats)
     return emb, stats

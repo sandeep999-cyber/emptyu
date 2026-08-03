@@ -140,13 +140,19 @@ def extract_split_embeddings(
     device: torch.device,
     max_windows: Optional[int] = None,
     batch_size: int = 32,
+    dataset: Optional[MarketDataset] = None,
 ) -> Dict[str, Any]:
     """Extract normalized pooled embeddings for a full split.
 
     Normalization matches training: features are transformed with the
     checkpoint's fitted normalizer before entering the model.
+
+    ``dataset`` may be supplied to reuse an already-built split dataset
+    (avoids holding two full window lists in memory, which caused OOM kills
+    in the linear-probe eval on the 65k-window train split).
     """
-    dataset = build_split_dataset(split, trainer_cfg, max_windows)
+    if dataset is None:
+        dataset = build_split_dataset(split, trainer_cfg, max_windows)
 
     class _NormalizedDataset(MarketDataset):
         def __getitem__(self, idx: int) -> Dict[str, Any]:
