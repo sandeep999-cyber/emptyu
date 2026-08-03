@@ -287,7 +287,10 @@ class TeacherTrainer:
         flat = features.reshape(-1, D)
         flat_norm = self.normalizer.transform(flat)
         features_norm = flat_norm.reshape(B, T, D)
-        return features_norm.to(self.device), features.to(self.device)
+        return (
+            features_norm.to(self.device, non_blocking=self.pin_memory),
+            features.to(self.device, non_blocking=self.pin_memory),
+        )
 
     def train(self):
         self.log.info("Starting training.")
@@ -337,7 +340,7 @@ class TeacherTrainer:
 
                 features_norm, features_raw = self._normalize_batch(features, feature_mask)
 
-                data_mask = mask.to(self.device)
+                data_mask = mask.to(self.device, non_blocking=self.pin_memory)
                 masked_positions = self.mask_generator(data_mask)
 
                 corrupted = features_norm.clone()
@@ -349,7 +352,11 @@ class TeacherTrainer:
                     else nullcontext()
                 )
                 with autocast:
-                    latent, kpm, positions, t_data = self.model(corrupted, timestamps.to(self.device), data_mask)
+                    latent, kpm, positions, t_data = self.model(
+                        corrupted,
+                        timestamps.to(self.device, non_blocking=self.pin_memory),
+                        data_mask,
+                    )
                     data_latent = latent[:, 1:, :]
                     reconstruction = self.model.reconstruct(data_latent)
                 if self.use_amp:
@@ -359,7 +366,7 @@ class TeacherTrainer:
                     reconstruction,
                     features_norm,
                     features_raw,
-                    feature_mask.to(self.device),
+                    feature_mask.to(self.device, non_blocking=self.pin_memory),
                     masked_positions,
                 )
                 loss = losses["total"]
@@ -457,12 +464,16 @@ class TeacherTrainer:
                 mask = batch["mask"]
 
                 features_norm, features_raw = self._normalize_batch(features, feature_mask)
-                data_mask = mask.to(self.device)
+                data_mask = mask.to(self.device, non_blocking=self.pin_memory)
                 masked_positions = self.val_mask_generator(data_mask)
                 corrupted = features_norm.clone()
                 corrupted = corrupted.masked_fill(masked_positions.unsqueeze(-1), 0.0)
 
-                latent, kpm, positions, t_data = self.model(corrupted, timestamps.to(self.device), data_mask)
+                latent, kpm, positions, t_data = self.model(
+                    corrupted,
+                    timestamps.to(self.device, non_blocking=self.pin_memory),
+                    data_mask,
+                )
                 data_latent = latent[:, 1:, :]
                 reconstruction = self.model.reconstruct(data_latent)
 
@@ -470,7 +481,7 @@ class TeacherTrainer:
                     reconstruction,
                     features_norm,
                     features_raw,
-                    feature_mask.to(self.device),
+                    feature_mask.to(self.device, non_blocking=self.pin_memory),
                     masked_positions,
                 )
                 total_loss += losses["total"].item() * features.shape[0]
