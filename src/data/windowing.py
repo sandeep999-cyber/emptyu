@@ -74,13 +74,13 @@ class WindowingEngine:
             pos_obs = fm_win.any(axis=1)
             mask_win = pos_obs
 
-            # Positions whose NEXT gap exceeds the expected step are also flagged
+            # Positions whose NEXT gap exceeds the expected step are also flagged.
+            # Next-gap flag on position i == ts_diffs[i] > expected_step*2; the last
+            # position has no next timestamp, so it is never flagged.
             expected_step = int(np.median(ts_diffs)) if len(ts_diffs) > 0 else 60000
             gap_exceeds_step = np.zeros(self.seq_len, dtype=bool)
-            for i in range(len(ts_diffs)):
-                if ts_diffs[i] > expected_step * 2:  # Double the expected step is suspicious
-                    gap_exceeds_step[i] = True
-            # Last position cannot be judged (no next timestamp) — mark valid if observed
+            gap_exceeds_step[:-1] = ts_diffs > expected_step * 2  # Double the expected step is suspicious
+            # (Last position cannot be judged — left False, so it stays observed)
             mask_win = mask_win & ~gap_exceeds_step
 
             win_meta = {
