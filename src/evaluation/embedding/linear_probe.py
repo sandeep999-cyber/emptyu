@@ -10,6 +10,7 @@ cross-symbol split. Reports balanced accuracy vs majority baselines.
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import numpy as np
 import torch
@@ -222,8 +223,10 @@ def main():
     parser.add_argument("--max-windows", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None,
                         help="Embedding extraction batch. CPU-only machines are "
-                             "often much faster at 128-256; GPU use 32-64 (VRAM). "
-                             "Default: 128 on CPU, 32 on CUDA.")
+                             "often fastest around 32 on older CPUs; GPU use 32-64 "
+                             "(VRAM). Default: 32 on CPU, 32 on CUDA.")
+    parser.add_argument("--threads", type=int, default=None,
+                        help="CPU torch threads. Default: min(12, CPU count).")
     parser.add_argument("--cache-dir", type=str, default=".cache/linear_probe",
                         help="Persistent embedding cache directory; use --no-cache to disable.")
     parser.add_argument("--no-cache", action="store_true",
@@ -233,8 +236,13 @@ def main():
     poolings = ["cls", "mean", "attention"] if args.pooling == "all" else [args.pooling]
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    batch_size = args.batch_size or (128 if device.type == "cpu" else 32)
-    print(f"[runtime] device={device}, batch_size={batch_size}", flush=True)
+    if device.type == "cpu":
+        threads = args.threads or min(12, os.cpu_count() or 1)
+        torch.set_num_threads(threads)
+    else:
+        threads = torch.get_num_threads()
+    batch_size = args.batch_size or 32
+    print(f"[runtime] device={device}, batch_size={batch_size}, threads={threads}", flush=True)
     model, normalizer, configs = load_model_and_normalizer(Path(args.checkpoint), device)
     trainer_cfg = configs["trainer_config"]
     style = trainer_cfg.get("feature_style", "raw")
