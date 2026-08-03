@@ -26,6 +26,10 @@ class TeacherEncoder(nn.Module):
         self.dropout = model_cfg["dropout"]
         rope_theta = model_cfg.get("rope_theta", 10000.0)
         self.feature_dim = model_cfg["feature_dim"]
+        # Exact upper bound on RoPE positions for this dataset, injected by the
+        # trainer. When set, forward can size the shared cache with a constant
+        # (no host sync) instead of reading positions.max() every forward.
+        self.max_position = model_cfg.get("max_position")
 
         self.projection = FeatureProjection(self.feature_dim, self.d_model)
         self.cls_embed = nn.Parameter(torch.randn(1, 1, self.d_model) * 0.02)
@@ -74,9 +78,13 @@ class TeacherEncoder(nn.Module):
         data_positions = 1 + minute_offsets
         cls_position = torch.zeros(B, 1, dtype=torch.long, device=device)
         positions = torch.cat([cls_position, data_positions], dim=1)  # [B, T_total]
-        # Size the shared RoPE cache once per forward; blocks index it without
-        # re-syncing. Rebuilds are no-ops after the largest position is seen.
-        self.rope.build_cache(int(positions.max().item()) + 1, device)
+        # Size the shared RoPE cache so blocks index it without re-syncing. The
+        # trainer-injected max_position makes this a constant no-op after warm-up;
+        # without it, fall back to the actual positions max (one host sync).
+        if self.max_position is not None:
+            self.rope.build_cache(self.max_position + 1, device)
+        else:
+            self.rope.build_cache(int(positions.max().item()) + 1, device)
         self.rope._cache_ready = True
 
         # key_padding_mask: CLS always valid, data uses sample mask

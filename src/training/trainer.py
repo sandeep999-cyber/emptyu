@@ -122,10 +122,11 @@ class TeacherTrainer:
         self.log.info(f"Normalizer fitted (mode={self.normalizer.mode})")
 
         full_model_cfg = {**model_cfg["model"], "loss": model_cfg.get("loss", {})}
+        full_model_cfg["max_position"] = self._compute_max_position()
         self.model = TeacherEncoder(full_model_cfg).to(self.device)
         if trainer_cfg.get("torch_compile", False):
             self.log.info("torch.compile enabled for the teacher encoder (experimental).")
-            self.model = torch.compile(self.model)
+            self.model = torch.compile(self.model, mode=trainer_cfg.get("compile_mode"))
         self.optimizer = build_optimizer(self.model, opt_cfg)
         total_steps = max(1, len(self.train_dataset) // max(1, trainer_cfg["batch_size"]) * trainer_cfg["epochs"])
         self.scheduler = build_scheduler(self.optimizer, opt_cfg, total_steps)
@@ -261,6 +262,29 @@ class TeacherTrainer:
             val_windows.extend(ds.windows)
 
         return MarketDataset(train_windows), MarketDataset(val_windows)
+
+    def _compute_max_position(self) -> int:
+        """Exact global upper bound on RoPE positions across all windows.
+
+        Positions are 1 + floor((ts - ts[0]) / 60_000). floor is monotonic, so
+        the per-window max is (ts.max() - ts[0]) // 60_000; taking the max over
+        every train/val window yields a fixed cache size with no runtime syncs.
+        """
+        best = 0
+        for ds in (self.train_dataset, self.val_dataset):
+            for win in ds.windows:
+                ts = win["timestamps"]
+                if ts is None or len(ts) == 0:
+                    continue
+                if isinstance(ts, (list, tuple)):
+                    ts = np.asarray(ts, dtype=np.int64)
+                elif hasattr(ts, "numpy"):
+                    ts = ts.numpy()
+                off = (int(ts.max()) - int(ts[0])) // 60000
+                if off + 1 > best:
+                    best = off + 1
+        self.log.info(f"RoPE max position across datasets: {best}")
+        return best
 
     def _fit_normalizer(self) -> FeatureNormalizer:
         all_feats = []

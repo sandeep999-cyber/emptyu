@@ -1,0 +1,97 @@
+"""Colab dry-run probe for picking training efficiency settings.
+
+Runs a warmup pass (triggers + caches torch.compile) then a timed pass for
+micro_batch_size in {32, 64} x torch_compile in {false, true}, reporting steady-
+state step time, projected full-epoch time, and peak VRAM. Output is meant to
+inform edits to configs/trainer_v1_scale30.yaml before the full 30-epoch run.
+"""
+
+import argparse
+import json
+import time
+from pathlib import Path
+import yaml
+import torch
+
+from src.training.trainer import TeacherTrainer
+
+FULL_TRAIN_WINDOWS = 65638
+
+
+def _run_case(model_cfg, opt_cfg, base, micro, comp, n_train, n_val, run_dir):
+    tc = dict(base)
+    tc.update(
+        micro_batch_size=micro,
+        torch_compile=comp,
+        epochs=1,
+        max_train_windows=n_train,
+        max_val_windows=n_val,
+        val_every=1,
+        checkpoint_every=1,
+    )
+    trainer = TeacherTrainer(model_cfg, opt_cfg, tc, Path(run_dir))
+    torch.cuda.reset_peak_memory_stats()
+    t0 = time.time()
+    trainer.train()
+    elapsed = time.time() - t0
+    vram = torch.cuda.max_memory_allocated() / 1e9
+    del trainer
+    torch.cuda.empty_cache()
+    return elapsed, vram
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--model-config", default="configs/model_v1.yaml")
+    ap.add_argument("--optimizer-config", default="configs/optimizer_v1.yaml")
+    ap.add_argument("--trainer-config", default="configs/trainer_v1_scale30.yaml")
+    ap.add_argument("--warmup-windows", type=int, default=256)
+    ap.add_argument("--timed-windows", type=int, default=2048)
+    args = ap.parse_args()
+
+    base = yaml.safe_load(Path(args.trainer_config).read_text())["trainer"]
+    model_cfg = yaml.safe_load(Path(args.model_config).read_text())
+    opt_cfg = yaml.safe_load(Path(args.optimizer_config).read_text())
+    eff_batch = int(base.get("batch_size", 64))
+
+    cases = [(32, False), (32, True), (64, False)]
+    rows = []
+    for micro, comp in cases:
+        accum = max(1, eff_batch // max(1, micro))
+        try:
+            _run_case(model_cfg, opt_cfg, base, micro, comp,
+                      args.warmup_windows, 64, f"/tmp/probe_warm_m{micro}_c{comp}")
+            elapsed, vram = _run_case(model_cfg, opt_cfg, base, micro, comp,
+                                      args.timed_windows, 128, f"/tmp/probe_timed_m{micro}_c{comp}")
+            n_steps = (args.timed_windows // micro) // accum
+            rows.append({
+                "micro_batch_size": micro,
+                "torch_compile": comp,
+                "step_ms": round(elapsed / max(1, n_steps) * 1000, 1),
+                "proj_full_epoch_min": round(elapsed * (FULL_TRAIN_WINDOWS / args.timed_windows) / 60, 1),
+                "peak_vram_gb": round(vram, 2),
+            })
+        except Exception as e:  # e.g. CUDA OOM for micro 64
+            rows.append({
+                "micro_batch_size": micro,
+                "torch_compile": comp,
+                "step_ms": None,
+                "proj_full_epoch_min": None,
+                "peak_vram_gb": None,
+                "error": str(e)[:200],
+            })
+        print(json.dumps(rows[-1]))
+
+    viable = [r for r in rows if r.get("proj_full_epoch_min") is not None]
+    if viable:
+        rec = min(viable, key=lambda r: r["proj_full_epoch_min"])
+        print("RECOMMEND: micro_batch_size={} torch_compile={} "
+              "(proj ~{:.1f} min/epoch, peak {:.2f} GB)".format(
+                  rec["micro_batch_size"], rec["torch_compile"],
+                  rec["proj_full_epoch_min"], rec["peak_vram_gb"]))
+    else:
+        print("RECOMMEND: all probed cases failed; keep micro_batch_size=32, torch_compile=false")
+
+
+if __name__ == "__main__":
+    main()
