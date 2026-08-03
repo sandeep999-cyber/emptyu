@@ -126,15 +126,9 @@ def evaluate_probe(train_emb: dict, test_emb: dict, test_train_emb: dict) -> dic
     }
 
 
-def _extract_with_labels(model, normalizer, split, pooling, trainer_cfg, device, max_windows):
+def _stats_for(windows, style: str) -> list:
     import time
-    from src.evaluation.embedding._common import build_split_dataset, extract_split_embeddings
-
-    dataset = build_split_dataset(split, trainer_cfg, max_windows)
-    style = trainer_cfg.get("feature_style", "raw")
-    windows = dataset.windows
     n = len(windows)
-
     keys = _STAT_KEYS
     cols = {k: np.empty(n, dtype=np.float64) for k in keys}
     chunk = 8192
@@ -146,68 +140,77 @@ def _extract_with_labels(model, normalizer, split, pooling, trainer_cfg, device,
         for k in keys:
             cols[k][start:end] = s[k]
         if start % (chunk * 4) == 0:
-            print(f"[{split}] stats {end}/{n} ({end / max(n, 1):.0%}) "
+            print(f"stats {end}/{n} ({end / max(n, 1):.0%}) "
                   f"{time.time() - t0:.1f}s", flush=True)
-    stats = [
+    return [
         {"volatility": float(cols["volatility"][i]),
          "range": float(cols["range"][i]),
          "volume": float(cols["volume"][i])}
         for i in range(n)
     ]
-    emb = extract_split_embeddings(
-        model, normalizer, split, pooling, trainer_cfg, device,
-        max_windows=max_windows, dataset=dataset,
-    )
-    assert len(emb["embedding"]) == len(stats)
-    return emb, stats
 
 
 def main():
-    from src.evaluation.embedding._common import load_model_and_normalizer
+    from src.evaluation.embedding._common import (
+        load_model_and_normalizer, build_split_dataset, extract_split_embeddings)
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=str, required=True, help="Run dir from CheckpointManager")
-    parser.add_argument("--pooling", type=str, default="mean", choices=["cls", "mean", "attention"])
+    parser.add_argument("--pooling", type=str, default="all",
+                        choices=["cls", "mean", "attention", "all"])
     parser.add_argument("--max-windows", type=int, default=None)
     args = parser.parse_args()
+
+    poolings = ["cls", "mean", "attention"] if args.pooling == "all" else [args.pooling]
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model, normalizer, configs = load_model_and_normalizer(Path(args.checkpoint), device)
     trainer_cfg = configs["trainer_config"]
+    style = trainer_cfg.get("feature_style", "raw")
 
-    train_emb, train_stats = _extract_with_labels(
-        model, normalizer, "train", args.pooling, trainer_cfg, device, args.max_windows)
-    print(f"[{args.pooling}] train extracted "
-          f"({len(train_emb['embedding'])} windows)", flush=True)
-    test_emb, test_stats = _extract_with_labels(
-        model, normalizer, "validation", args.pooling, trainer_cfg, device, args.max_windows)
-    print(f"[{args.pooling}] validation extracted "
-          f"({len(test_emb['embedding'])} windows)", flush=True)
+    # Build each split dataset ONCE and share across all poolings.
+    print(f"[data] building train split...", flush=True)
+    train_ds = build_split_dataset("train", trainer_cfg, args.max_windows)
+    train_stats = _stats_for(train_ds.windows, style)
+    print(f"[data] train windows={len(train_ds.windows)}", flush=True)
+    print(f"[data] building validation split...", flush=True)
+    test_ds = build_split_dataset("validation", trainer_cfg, args.max_windows)
+    test_stats = _stats_for(test_ds.windows, style)
+    print(f"[data] validation windows={len(test_ds.windows)}", flush=True)
 
-    # In-sample baseline: same train windows used for fitting the probe
-    test_train_emb, test_train_stats = train_emb, train_stats
-
-    # Thresholds from TRAIN split only (no cross-split leakage)
+    # Thresholds from TRAIN split only (no cross-split leakage).
     thresholds = {
         "volatility": float(np.median([s["volatility"] for s in train_stats])),
         "range": float(np.median([s["range"] for s in train_stats])),
         "volume": float(np.median([s["volume"] for s in train_stats])),
     }
-
-    train_emb.update(_labels_from_stats(train_stats, thresholds))
-    test_emb.update(_labels_from_stats(test_stats, thresholds))
-    test_train_emb = dict(test_train_emb)
-    test_train_emb.update(_labels_from_stats(test_train_stats, thresholds))
-
-    results = evaluate_probe(train_emb, test_emb, test_train_emb)
-    results["thresholds"] = {k: round(v, 8) for k, v in thresholds.items()}
+    train_labels = _labels_from_stats(train_stats, thresholds)
+    test_labels = _labels_from_stats(test_stats, thresholds)
 
     out_dir = Path("evaluation/embedding")
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"linear_probe_{args.pooling}.json"
-    path.write_text(json.dumps(results, indent=2))
-    print(f"Linear probe results written to {path}")
-    print(json.dumps(results, indent=2))
+
+    for pooling in poolings:
+        print(f"=== Pooling: {pooling} ===", flush=True)
+        train_emb = extract_split_embeddings(
+            model, normalizer, "train", pooling, trainer_cfg, device, dataset=train_ds)
+        print(f"[{pooling}] train embeddings extracted "
+              f"({len(train_emb['embedding'])})", flush=True)
+        test_emb = extract_split_embeddings(
+            model, normalizer, "validation", pooling, trainer_cfg, device, dataset=test_ds)
+        print(f"[{pooling}] validation embeddings extracted "
+              f"({len(test_emb['embedding'])})", flush=True)
+
+        train_emb.update(train_labels)
+        test_emb.update(test_labels)
+        results = evaluate_probe(train_emb, test_emb, train_emb)
+        results["thresholds"] = {k: round(v, 8) for k, v in thresholds.items()}
+
+        path = out_dir / f"linear_probe_{pooling}.json"
+        path.write_text(json.dumps(results, indent=2))
+        print(f"Linear probe results written to {path}")
+        print(json.dumps(results, indent=2))
+        del train_emb, test_emb
 
 
 if __name__ == "__main__":
